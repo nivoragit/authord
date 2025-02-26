@@ -1,131 +1,229 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Authord</title>
-    <style>
-        /* Global Styles */
-        body {
-            font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 0;
-            background-color: #f4f4f4;
-            color: #333;
-        }
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Authord</title>
+  <style>
+    /* Global Styles */
+    body {
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      margin: 0;
+      padding: 0;
+      background-color: #f5f7fa;
+      color: #333;
+      line-height: 1.6;
+      scroll-behavior: smooth;
+    }
 
-        /* Header Styles */
-        header {
-            background: linear-gradient(135deg, #222, #444);
-            color: white;
-            padding: 30px;
-            text-align: center;
-        }
+    /* Header Styles */
+    header {
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      color: #fff;
+      padding: 40px;
+      text-align: center;
+    }
 
-        /* Navigation Bar */
-        nav {
-            background: #333;
-            padding: 10px;
-            text-align: center;
-        }
+    header h1 {
+      margin: 0;
+      font-size: 2.5rem;
+      letter-spacing: 1px;
+    }
 
-        nav a {
-            color: white;
-            text-decoration: none;
-            padding: 10px 20px;
-            display: inline-block;
-            transition: background 0.3s, transform 0.3s;
-        }
+    header p {
+      font-size: 1.1rem;
+      margin-top: 10px;
+      opacity: 0.9;
+      max-width: 700px;
+      margin: 10px auto 0;
+    }
 
-        nav a:hover {
-            background: #555;
-            transform: scale(1.05);
-        }
+    /* Navigation Bar */
+    nav {
+      background-color: #44337a;
+      padding: 10px;
+      text-align: center;
+      position: sticky;
+      top: 0;
+      z-index: 999;
+    }
 
-        /* Main Content */
-        .container {
-            max-width: 900px;
-            margin: 20px auto;
-            padding: 20px;
-            background: white;
-            border-radius: 8px;
-            box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.1);
-        }
+    nav a {
+      color: #fff;
+      text-decoration: none;
+      padding: 10px 20px;
+      display: inline-block;
+      margin: 0 5px;
+      border-radius: 4px;
+      transition: background 0.3s, transform 0.3s;
+    }
 
-        h1, h2 {
-            color: #222;
-        }
+    nav a:hover {
+      background: #5a3f74;
+      transform: translateY(-2px);
+    }
 
-        /* Footer */
-        footer {
-            text-align: center;
-            padding: 15px;
-            background: #222;
-            color: white;
-            margin-top: 20px;
-            font-size: 0.9em;
-        }
+    /* Main Content Container */
+    .container {
+      max-width: 900px;
+      margin: 20px auto;
+      padding: 20px;
+      background: linear-gradient(to bottom, #fff, #fdfdfd);
+      border-radius: 8px;
+      box-shadow: 0 0 12px rgba(0, 0, 0, 0.1);
+      transition: background 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
+    }
 
-        /* Responsive Navigation */
-        @media (max-width: 600px) {
-            nav a {
-                padding: 10px;
-                display: block;
-                margin: 5px 0;
-            }
-        }
-    </style>
+    .container:hover {
+      background: linear-gradient(to bottom, #fafafa, #fff);
+      box-shadow: 0 0 16px rgba(0, 0, 0, 0.15);
+      transform: translateY(-2px);
+    }
+
+    section {
+      padding-top: 80px;
+      margin-top: -80px;
+    }
+
+    h2 {
+      color: #2d2d2d;
+      margin-top: 0;
+    }
+
+    p, li {
+      font-size: 1rem;
+      margin-bottom: 10px;
+    }
+
+    ul {
+      list-style-type: disc;
+      padding-left: 20px;
+    }
+
+    /* Footer */
+    footer {
+      text-align: center;
+      padding: 15px;
+      background: #44337a;
+      color: #fff;
+      margin-top: 20px;
+      font-size: 0.9em;
+    }
+
+    /* Scroll to Top Button */
+    #scrollToTopBtn {
+      position: fixed;
+      bottom: 40px;
+      right: 40px;
+      padding: 10px 16px;
+      background-color: #44337a;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 1rem;
+      display: none;
+      transition: opacity 0.3s;
+    }
+
+    #scrollToTopBtn:hover {
+      background-color: #5a3f74;
+    }
+
+    /* Responsive Navigation */
+    @media (max-width: 600px) {
+      nav a {
+        display: block;
+        margin: 5px 0;
+      }
+      header h1 {
+        font-size: 2rem;
+      }
+      header p {
+        font-size: 1rem;
+      }
+      #scrollToTopBtn {
+        right: 20px;
+        bottom: 20px;
+      }
+    }
+  </style>
 </head>
 <body>
 
-    <header>
-        <h1>Authord</h1>
-        <p>Your lightweight documentation management extension for VS Code</p>
-    </header>
+  <header>
+    <h1>Authord</h1>
+    <p>
+      Supercharge your VS Code documentation workflow with Authord: a modern, intuitive, and powerful extension designed to streamline your writing process.
+    </p>
+  </header>
 
-    <nav>
-        <a href="#features">Features</a>
-        <a href="#getting-started">Getting Started</a>
-        <a href="#writerside">Writerside Compatibility</a>
-        <a href="#known-issues">Known Issues</a>
-        <a href="https://github.com/nivora/authord" target="_blank">GitHub</a>
-    </nav>
+  <nav>
+    <a href="#features">Features</a>
+    <a href="#usage">Usage</a>
+    <a href="#writerside">Writerside Compatibility</a>
+    <a href="#known-issues">Known Issues</a>
+    <a href="https://github.com/nivoragit/vscode-authord" target="_blank">GitHub</a>
+  </nav>
 
-    <div class="container">
-        <h2 id="features">📌 Features</h2>
-        <ul>
-            <li><strong>Documentations Tree View</strong>: Lists documentation instances defined in <code>authord.json</code>.</li>
-            <li><strong>Topics Tree View</strong>: Displays topics corresponding to the selected documentation instance.</li>
-            <li><strong>Dynamic Updates</strong>: Reflects changes in real-time in the topics directory.</li>
-            <li><strong>Open Topics</strong>: Click on a topic to open its Markdown file in the editor.</li>
-            <li><strong>Side-by-Side Preview</strong>: Open documents and view a live preview simultaneously for enhanced editing.</li>
-        </ul>
+  <div class="container">
+    <section id="features">
+      <h2>Features</h2>
+      <ul>
+        <li><strong>Documentations Tree View</strong>: Easily navigate through your documentation instances defined in <code>authord.json</code>.</li>
+        <li><strong>Topics Tree View</strong>: Quickly browse topics for each documentation instance, ensuring effortless organization.</li>
+        <li><strong>Dynamic Updates</strong>: Real-time synchronization in the topics directory keeps your documentation current.</li>
+        <li><strong>Open Topics</strong>: Instantly open any Markdown file for fast edits.</li>
+        <li><strong>Side-by-Side Preview</strong>: Streamlined editing with a live preview, boosting productivity.</li>
+      </ul>
+    </section>
+    <section id="usage">
+      <h2>Usage</h2>
+      <p>Simply click the Authord icon in the Activity Bar of VS Code to start browsing and managing your documentation.</p>
+    </section>
 
-        <h2 id="getting-started">🚀 Getting Started</h2>
-        <p>To use the Authord Docs Extension, follow these steps:</p>
-        <ol>
-            <li>Ensure you have <code>authord.json</code> in the root of your VS Code workspace.</li>
-            <li>Create a <code>topics</code> directory containing Markdown documentation files.</li>
-            <li>Launch VS Code and open the Authord sidebar to browse and open topics.</li>
-        </ol>
+    <section id="writerside">
+      <h2>Writerside Compatibility</h2>
+      <p>Continue your JetBrains Writerside projects seamlessly within Authord. While you can't create new Writerside projects directly here, you can easily pick up where you left off and harness the benefits of both platforms.</p>
+    </section>
 
-        <h2 id="writerside">📝 Writerside Compatibility</h2>
-        <p>Authord integrates with JetBrains' <strong>Writerside</strong>. You can open and continue Writerside projects, but new Writerside projects cannot be created within Authord.</p>
+    <section id="known-issues">
+      <h2>Known Issues</h2>
+      <p>Currently, Authord supports a single instance in <code>authord.json</code>. Multi-instance capabilities are planned for future releases.</p>
+    </section>
 
-        <h2 id="known-issues">⚠️ Known Issues</h2>
-        <p>Currently, Authord Docs Extension supports only a single instance in <code>authord.json</code>. Future updates may introduce multi-instance support.</p>
+    <section>
+      <h2>Release Notes</h2>
+      <p><strong>Version 1.0.0</strong></p>
+      <ul>
+        <li>Initial release of Authord Docs Extension</li>
+        <li>Includes Writerside compatibility</li>
+      </ul>
+    </section>
+  </div>
 
-        <h2>📜 Release Notes</h2>
-        <p><strong>Version 1.0.0</strong></p>
-        <ul>
-            <li>Initial release of Authord Docs Extension</li>
-            <li>Basic Writerside compatibility added</li>
-        </ul>
-    </div>
+  <footer>
+    <p>© 2025 Nivora (Pvt) Ltd - Authord - Elevate your documentation management experience</p>
+  </footer>
 
-    <footer>
-        <p>© 2025 nivora(pvt) Ltd - Authord Documentation - Built for seamless doc management</p>
-    </footer>
+  <!-- Scroll to Top Button -->
+  <button id="scrollToTopBtn" title="Scroll to Top">▲</button>
 
+  <script>
+    // Show "Scroll to Top" button when scrolling down
+    const scrollToTopBtn = document.getElementById("scrollToTopBtn");
+    window.addEventListener("scroll", () => {
+      if (window.scrollY > 300) {
+        scrollToTopBtn.style.display = "block";
+      } else {
+        scrollToTopBtn.style.display = "none";
+      }
+    });
+
+    // Smooth scroll to top
+    scrollToTopBtn.addEventListener("click", () => {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    });
+  </script>
 </body>
 </html>
