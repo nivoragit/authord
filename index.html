@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Authord</title>
+    <style>
+        /* Global Styles */
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f4f4f4;
+            color: #333;
+        }
+
+        /* Header Styles */
+        header {
+            background: linear-gradient(135deg, #222, #444);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        /* Navigation Bar */
+        nav {
+            background: #333;
+            padding: 10px;
+            text-align: center;
+        }
+
+        nav a {
+            color: white;
+            text-decoration: none;
+            padding: 10px 20px;
+            display: inline-block;
+            transition: background 0.3s, transform 0.3s;
+        }
+
+        nav a:hover {
+            background: #555;
+            transform: scale(1.05);
+        }
+
+        /* Main Content */
+        .container {
+            max-width: 900px;
+            margin: 20px auto;
+            padding: 20px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        h1, h2 {
+            color: #222;
+        }
+
+        /* Footer */
+        footer {
+            text-align: center;
+            padding: 15px;
+            background: #222;
+            color: white;
+            margin-top: 20px;
+            font-size: 0.9em;
+        }
+
+        /* Responsive Navigation */
+        @media (max-width: 600px) {
+            nav a {
+                padding: 10px;
+                display: block;
+                margin: 5px 0;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>Authord</h1>
+        <p>Your lightweight documentation management extension for VS Code</p>
+    </header>
+
+    <nav>
+        <a href="#features">Features</a>
+        <a href="#getting-started">Getting Started</a>
+        <a href="#writerside">Writerside Compatibility</a>
+        <a href="#known-issues">Known Issues</a>
+        <a href="https://github.com/nivora/authord" target="_blank">GitHub</a>
+    </nav>
+
+    <div class="container">
+        <h2 id="features">📌 Features</h2>
+        <ul>
+            <li><strong>Documentations Tree View</strong>: Lists documentation instances defined in <code>authord.json</code>.</li>
+            <li><strong>Topics Tree View</strong>: Displays topics corresponding to the selected documentation instance.</li>
+            <li><strong>Dynamic Updates</strong>: Reflects changes in real-time in the topics directory.</li>
+            <li><strong>Open Topics</strong>: Click on a topic to open its Markdown file in the editor.</li>
+            <li><strong>Side-by-Side Preview</strong>: Open documents and view a live preview simultaneously for enhanced editing.</li>
+        </ul>
+
+        <h2 id="getting-started">🚀 Getting Started</h2>
+        <p>To use the Authord Docs Extension, follow these steps:</p>
+        <ol>
+            <li>Ensure you have <code>authord.json</code> in the root of your VS Code workspace.</li>
+            <li>Create a <code>topics</code> directory containing Markdown documentation files.</li>
+            <li>Launch VS Code and open the Authord sidebar to browse and open topics.</li>
+        </ol>
+
+        <h2 id="writerside">📝 Writerside Compatibility</h2>
+        <p>Authord integrates with JetBrains' <strong>Writerside</strong>. You can open and continue Writerside projects, but new Writerside projects cannot be created within Authord.</p>
+
+        <h2 id="known-issues">⚠️ Known Issues</h2>
+        <p>Currently, Authord Docs Extension supports only a single instance in <code>authord.json</code>. Future updates may introduce multi-instance support.</p>
+
+        <h2>📜 Release Notes</h2>
+        <p><strong>Version 1.0.0</strong></p>
+        <ul>
+            <li>Initial release of Authord Docs Extension</li>
+            <li>Basic Writerside compatibility added</li>
+        </ul>
+    </div>
+
+    <footer>
+        <p>© 2025 nivora(pvt) Ltd - Authord Documentation - Built for seamless doc management</p>
+    </footer>
+
+</body>
+</html>
