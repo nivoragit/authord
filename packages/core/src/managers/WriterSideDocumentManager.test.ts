@@ -3,8 +3,8 @@
 
 import * as path from 'path';
 import WriterSideDocumentManager from './WriterSideDocumentManager';
-import AbstractFileService from '../services/FileService'; // Abstract class for instance methods
-import FileService from '../services/FileService'; // Concrete import for static methods
+import AbstractFileService from '../services/AbstractFileService'; // Abstract class for instance methods
+import FileService from '../services/AbstractFileService'; // Concrete import for static methods
 import { InstanceProfile, WriterSideInstanceProfile } from '../types';
 import { Notifier } from '../notifier/Notifier';
 

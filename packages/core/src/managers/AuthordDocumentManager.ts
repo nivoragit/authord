@@ -1,7 +1,7 @@
 /* eslint-disable no-param-reassign, no-useless-constructor, @typescript-eslint/no-unused-vars */
 import * as path from 'path';
 import { AuthordConfig, InstanceProfile, TocElement } from '../types';
-import FileService from '../services/FileService';
+import FileService from '../services/AbstractFileService';
 import AbstractDocumentationManager from './AbstractDocumentationManager';
 // import TopicsService from '../services/TopicsService';
 import { DocumentationManager } from "./DocumentationManager";

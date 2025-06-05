@@ -1,15 +1,20 @@
 import Ajv from 'ajv';
 import { InstanceProfile, AuthordConfig } from '../types';
-import FileService from '../services/FileService';
+import FileService from '../services/ConsoleFileService';
  
-
 export async function writersideSchemaValidator(schemaPath: string, ihpData:any, instances:InstanceProfile[], fileService: FileService): Promise<void> {
     const ajv = new Ajv({ allErrors: true });
     const rawSchema = await fileService.readFileAsString(schemaPath);
     const schema = JSON.parse(rawSchema);
 
     const ihp = ihpData?.ihp;
-    const topicsDir = ihp?.topics?.['@_dir'] || 'topics';
+    const topicsDir = ihp?.topics?.['@_dir']; // || 'topics';
+
+    if(!topicsDir){
+      throw new Error(
+        'Schema validation failed: topics dir not available'
+      );
+    }
     let imagesObj: any;
     if (ihp?.images) {
       imagesObj = {
@@ -17,6 +22,10 @@ export async function writersideSchemaValidator(schemaPath: string, ihpData:any,
         version: ihp.images['@_version'],
         'web-path': ihp.images['@_web-path'],
       };
+    }else{
+      throw new Error(
+        'Schema validation failed: images dir not available'
+      );
     }
 
     const configJson = {
@@ -52,7 +61,7 @@ export async function authortdSchemaValidator(schemaPath: string, configData:Aut
     const ajv = new Ajv({ allErrors: true });
     const schemaData = await fileService.readFileAsString(schemaPath);
     const schema = JSON.parse(schemaData);
-
+    
     const validate = ajv.compile(schema);
     const valid = validate(configData);
     if (!valid) {

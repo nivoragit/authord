@@ -2,7 +2,7 @@
 import * as path from 'path';
 import { XMLBuilder } from 'fast-xml-parser';
 import { InstanceProfile, TocElement, WriterSideInstanceProfile } from '../types';
-import FileService from '../services/FileService';
+import FileService from '../services/AbstractFileService';
 import AbstractDocumentationManager from './AbstractDocumentationManager';
 import { DocumentationManager } from "./DocumentationManager";
 import { Notifier } from '../notifier/Notifier';

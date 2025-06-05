@@ -1,8 +1,3 @@
-export interface Topic {
-  name: string;
-  path: string;
-}
-
 export interface TocElement {
   topic: string;
   title: string;
@@ -27,3 +22,13 @@ export interface AuthordConfig {
   instances?: InstanceProfile[];
   [key: string]: any;
 }
+
+
+export type AuthorDConfig = {
+  project: string;
+  documents: {
+    id: string;
+    title: string;
+    path: string;
+  }[];
+};

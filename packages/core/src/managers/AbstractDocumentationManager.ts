@@ -2,7 +2,7 @@
 // import * as vscode from 'vscode';
 import * as path from 'path';
 import { InstanceProfile, TocElement } from '../types';
-import FileService from '../services/FileService';
+import FileService from '../services/AbstractFileService';
 import { DocumentationManager } from './DocumentationManager';
 import { Notifier } from '../notifier/Notifier';
 

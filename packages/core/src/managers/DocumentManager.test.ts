@@ -6,7 +6,7 @@
 import 'jest';
 import * as path from 'path';
 import { InstanceProfile, TocElement } from '../types';
-import FileService from '../services/FileService';
+import FileService from '../services/AbstractFileService';
 import AbstractDocumentationManager from './AbstractDocumentationManager';
 import { Notifier } from '../notifier/Notifier';
 

@@ -1,7 +1,7 @@
 import * as path from 'path';
 import { AuthordConfig, InstanceProfile } from '../types';
 import AuthordDocumentManager from './AuthordDocumentManager';
-import AbstractFileService from '../services/FileService';
+import AbstractFileService from '../services/AbstractFileService';
 import { Notifier } from '../notifier/Notifier';
 
 jest.mock('../services/FileService');
