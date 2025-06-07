@@ -6,7 +6,8 @@
   "private": true,
   "workspaces": [
     "packages/core",
-    "packages/cli"
+    "packages/cli",
+    "packages/renderer-html"
   ],
   "scripts": {
     "prepare": "husky install",

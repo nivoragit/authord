@@ -1,152 +1,142 @@
+// src/commands/lint.ts
+//
+// Efficient ✨ – separates config-path errors from markdown-lint results.
+
 import path from 'path';
 import fs from 'fs';
-import { AuthordConfig, InstanceProfile, readConfig, TocElement } from '@authord/core';
+import {
+  AuthordConfig,
+  InstanceProfile,
+  readConfig,
+  TocElement
+} from '@authord/core';
+import {
+  validateMarkdown,
+  ValidationResult
+} from '../linter/markdown-validator';
 
 export async function lintCommand() {
   const projectRoot = process.cwd();
-  // let config: AuthordConfig;
-  
-  // try {
-  //   config = await readConfig(projectRoot);
-  //   console.log('✓ Configuration valid');
-  // } catch (error: any) {
-  //   console.error('Configuration error:', error.message);
-  //   process.exit(1);
-  // }
 
-  // const errors: { path: string; reason: string }[] = [];
+  /* ---------- 1. read config ---------- */
+  let config: AuthordConfig;
+  try {
+    config = await readConfig(projectRoot);
+    console.log('✓ Configuration valid');
+  } catch (err: any) {
+    console.error('Configuration error:', err.message);
+    process.exit(1);
+  }
 
-  // // Validate topics directory
-  // if (config.topics?.dir) {
-  //   const topicsDir = path.resolve(projectRoot, config.topics.dir);
-    
-  //   if (!fs.existsSync(topicsDir)) {
-  //     errors.push({
-  //       path: config.topics.dir,
-  //       reason: 'Topics directory not found'
-  //     });
-  //   } else if (!fs.statSync(topicsDir).isDirectory()) {
-  //     errors.push({
-  //       path: config.topics.dir,
-  //       reason: 'Topics path is not a directory'
-  //     });
-  //   }
-  // }
+  /* ---------- 2. non-markdown checks ---------- */
+  const pathErrors: { path: string; reason: string }[] = [];
 
-  // // Validate images directory
-  // if (config.images?.dir) {
-  //   const imagesDir = path.resolve(projectRoot, config.images.dir);
-    
-  //   if (!fs.existsSync(imagesDir)) {
-  //     errors.push({
-  //       path: config.images.dir,
-  //       reason: 'Images directory not found'
-  //     });
-  //   } else if (!fs.statSync(imagesDir).isDirectory()) {
-  //     errors.push({
-  //       path: config.images.dir,
-  //       reason: 'Images path is not a directory'
-  //     });
-  //   }
-  // }
+  checkDir(config.topics?.dir, 'Topics', pathErrors, projectRoot);
+  checkDir(config.images?.dir, 'Images', pathErrors, projectRoot);
 
-  // // Validate instances and TOC elements
-  // if (config.instances) {
-  //   for (const instance of config.instances) {
-  //     // Validate start-page
-  //     if (instance['start-page']) {
-  //       validateTopicFile(
-  //         instance, 
-  //         instance['start-page'], 
-  //         'Start page',
-  //         errors,
-  //         config.topics?.dir
-  //       );
-  //     }
+  if (config.instances) {
+    for (const inst of config.instances) {
+      // start page
+      if (inst['start-page']) {
+        validateTopicFile(inst, inst['start-page'], 'Start page', pathErrors, config.topics?.dir);
+      }
+      // toc
+      inst['toc-elements'].forEach((toc) =>
+        validateTocElement(inst, toc, pathErrors, config.topics?.dir)
+      );
+    }
+  }
 
-  //     // Validate all TOC elements recursively
-  //     for (const toc of instance['toc-elements']) {
-  //       validateTocElement(
-  //         instance, 
-  //         toc, 
-  //         errors,
-  //         config.topics?.dir,
-  //         projectRoot
-  //       );
-  //     }
-  //   }
-  // }
+  if (pathErrors.length) {
+    printPathErrors(pathErrors);
+    process.exit(1);
+  }
+  console.log('✓ All directories and topic files exist');
 
-  // // Output results
-  // if (errors.length > 0) {
-  //   console.error('\nLint errors found:');
-  //   errors.forEach((error, index) => {
-  //     console.error(`${index + 1}. ${error.path} - ${error.reason}`);
-  //   });
-  //   process.exit(1);
-  // }
+  /* ---------- 3. markdown lint ---------- */
+  const mdErrors: ValidationResult[] = [];
+  for (const doc of config.documents ?? []) {
+    const filePath = path.resolve(config.root ?? projectRoot, doc.path);
+    const res = await validateMarkdown(filePath);
+    if (res.errors.length) mdErrors.push(res);
+  }
 
-  // console.log('✓ All directories and topic files exist');
-  // console.log('\nLint check passed successfully');
-  // process.exit(0);
+  if (mdErrors.length) {
+    printMarkdownErrors(mdErrors);
+    process.exit(1);
+  }
+
+  console.log('✅ All markdown resources are valid');
+  process.exit(0);
 }
 
-// Helper function to validate a single TOC element
-function validateTocElement(
-  instance: InstanceProfile,
-  toc: TocElement,
-  errors: { path: string; reason: string }[],
-  topicsDir: string | undefined,
-  projectRoot: string
-) {
-  // Validate current topic
-  validateTopicFile(
-    instance, 
-    toc.topic, 
-    'TOC element',
-    errors,
-    topicsDir
-  );
+/* ───────── helpers ───────── */
 
-  // Validate children recursively
-  for (const child of toc.children) {
-    validateTocElement(
-      instance, 
-      child, 
-      errors,
-      topicsDir,
-      projectRoot
-    );
+function checkDir(
+  dir: string | undefined,
+  label: string,
+  errs: { path: string; reason: string }[],
+  root: string
+) {
+  if (!dir) return;
+  const abs = path.resolve(root, dir);
+  if (!fs.existsSync(abs)) {
+    errs.push({ path: dir, reason: `${label} directory not found` });
+  } else if (!fs.statSync(abs).isDirectory()) {
+    errs.push({ path: dir, reason: `${label} path is not a directory` });
   }
 }
 
-// Helper function to validate a topic file
+function validateTocElement(
+  inst: InstanceProfile,
+  toc: TocElement,
+  errs: { path: string; reason: string }[],
+  topicsDir: string | undefined
+) {
+  validateTopicFile(inst, toc.topic, 'TOC element', errs, topicsDir);
+  toc.children.forEach((child) =>
+    validateTocElement(inst, child, errs, topicsDir)
+  );
+}
+
 function validateTopicFile(
-  instance: InstanceProfile,
+  inst: InstanceProfile,
   topicPath: string,
   context: string,
-  errors: { path: string; reason: string }[],
+  errs: { path: string; reason: string }[],
   topicsDir: string | undefined
 ) {
   if (!topicsDir) {
-    errors.push({
+    errs.push({
       path: topicPath,
       reason: `${context} referenced but topics directory not configured`
     });
     return;
   }
-
-  const fullPath = path.resolve(topicsDir, topicPath);
-  
-  if (!fs.existsSync(fullPath)) {
-    errors.push({
+  const full = path.resolve(topicsDir, topicPath);
+  if (!fs.existsSync(full)) {
+    errs.push({
       path: topicPath,
-      reason: `${context} for instance '${instance.id}' not found`
+      reason: `${context} for instance '${inst.id}' not found`
     });
-  } else if (path.extname(fullPath) !== '.md') {
-    errors.push({
+  } else if (path.extname(full) !== '.md') {
+    errs.push({
       path: topicPath,
-      reason: `${context} for instance '${instance.id}' is not a markdown file`
+      reason: `${context} for instance '${inst.id}' is not a markdown file`
     });
   }
+}
+
+/* ---------- pretty printers ---------- */
+
+function printPathErrors(errs: { path: string; reason: string }[]) {
+  console.error('\nLint errors (paths):');
+  errs.forEach((e, i) => console.error(`${i + 1}. ${e.path} – ${e.reason}`));
+}
+
+function printMarkdownErrors(results: ValidationResult[]) {
+  results.forEach((r) => {
+    console.error(`\n❌ ${path.relative(process.cwd(), r.filePath)}`);
+    r.errors.forEach((e) => console.error(`  ⚠ ${e.type}: ${e.message}`));
+  });
 }

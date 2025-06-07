@@ -1,6 +1,6 @@
 export interface TocElement {
   topic: string;
-  title: string;
+  title?: string;
   children: TocElement[];
   parent?: TocElement;
 }
