@@ -10,7 +10,8 @@
 import path from 'path';
 import fs from 'fs-extra';
 import fg from 'fast-glob';
-import { renderHtml } from '.';
+import { htmlRenderer } from './htmlRenderer';
+
 
 export async function render_all() {
   const [srcDir = '.', outFile = './build/all.html', flag] = process.argv.slice(2);
@@ -28,7 +29,7 @@ export async function render_all() {
   }
 
   /* 2️⃣  render */
-  const { html, assets } = await renderHtml(mdFiles, {
+  const { html, assets } = await htmlRenderer(mdFiles, {
     inlineAssets,
     projectTitle: path.basename(srcDir),
   });
