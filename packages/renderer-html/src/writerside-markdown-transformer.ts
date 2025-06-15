@@ -1,31 +1,71 @@
-// src/utils/writerside-markdown-transformer.ts
-
 import { MarkdownTransformer } from '@atlaskit/editor-markdown-transformer';
 import { unified } from 'unified';
 import remarkParse from 'remark-parse';
 import remarkDirective from 'remark-directive';
 import remarkStringify from 'remark-stringify';
 import { visit } from 'unist-util-visit';
-import { Node as PMNode, Schema } from 'prosemirror-model';
+import { Node as PMNode } from 'prosemirror-model';
 import { defaultSchema } from '@atlaskit/adf-schema/schema-default';
 
-/**
- * WritersideMarkdownTransformer
- * — fully updated for:
- *   • true heading separation
- *   • placeholders → extension / bodiedExtension / multiBodiedExtension
- *   • comments preserved as code blocks (language: "comment")
- *   • CDATA captured
- *   • <seealso> lists → seealso extension
- *   • collapsible headings → expand nodes (collapsed by default)
- *   • stray empty paragraphs removed
- *   • inline <code>/<shortcut> converted to code marks
- *   • <tabs> containers mapped to multiBodiedExtension
- */
+/* ──────────────────────────────────────────────── */
+/* 1. Constants & helpers                           */
+/* ──────────────────────────────────────────────── */
+
+const SAFE_LANGS = new Set<string>([
+  'abap','actionscript3','applescript','bash','c','clojure','cpp','csharp','css','diff','docker','elixir',
+  'erlang','go','groovy','haskell','java','javascript','js','json','kotlin','less','lua','makefile','markdown',
+  'matlab','objective-c','perl','php','powershell','python','r','ruby','rust','sass','scala','shell','sql',
+  'swift','typescript','yaml',
+  'mermaid','plantuml'        // allow diagram languages
+]);
+
+const ATTR_WHITELIST: Record<string, string[]> = {
+  heading:      ['level'],
+  orderedList:  ['order'],
+  codeBlock:    ['language'],
+  link:         ['href'],
+  panel:        ['panelType'],
+  mediaSingle:  ['layout'],
+  media:        ['type','url','alt'],
+  table:        ['isNumberColumnEnabled','layout'],
+  tableHeader:  ['colspan','rowspan'],
+  tableCell:    ['colspan','rowspan'],
+  expand:               ['title'],
+  bodiedExtension:      ['extensionType','extensionKey','parameters'],
+  multiBodiedExtension: ['extensionType','extensionKey','parameters'],
+  extension:            ['extensionType','extensionKey','parameters'],
+  taskItem:             ['localId','state'],
+  taskList:             [],
+  decisionItem:         ['localId'],
+  decisionList:         [],
+  date:                 ['timestamp'],
+  mention:              ['id','text','userType']
+};
+
+const MARK_ATTR_WHITELIST: Record<string, string[]> = { link: ['href'] };
+const MARK_TYPE_WHITELIST = new Set([
+  'strong', 'em', 'underline', 'strike',
+  'link', 'subsup', 'code', 'textColor'
+]);
+
+const stripHtml = (txt: string) => txt.replace(/<[^>]+>/g, '');
+
+/* ──────────────────────────────────────────────── */
+/* 2. Transformer                                  */
+/* ──────────────────────────────────────────────── */
+
 export class WritersideMarkdownTransformer extends MarkdownTransformer {
-  override parse(markdown: string): PMNode {
-    const cleaned = preprocess(markdown);
-    const roundtripped = unified()
+  /** Return ADF JSON object (not string) */
+  toADF(md: string): any {
+    const adf = finalSanitize(this._parseToJson(md));
+    adf.version = 1;
+    return adf;
+  }
+
+  /** ───────── INTERNAL ───────── */
+  private _parseToJson(md: string): any {
+    const cleaned = preprocess(md);
+    const roundTripped = unified()
       .use(remarkParse)
       .use(remarkPreserveComments)
       .use(remarkDirective)
@@ -33,50 +73,100 @@ export class WritersideMarkdownTransformer extends MarkdownTransformer {
       .processSync(cleaned)
       .toString();
 
-    // 1) Parse to JSON, inject required version, strip top-level empties
-    const baseJson: any = super.parse(roundtripped).toJSON();
-    baseJson.version = 1;
-    baseJson.content = baseJson.content.filter(
+    const base = super.parse(roundTripped).toJSON() as any;
+    base.version = 1;
+    base.content = base.content.filter(
       (n: any) => !(n.type === 'paragraph' && (!n.content || n.content.length === 0))
     );
 
-    // 2) Group expand content and apply transforms
-    const nested = groupExpandContent(baseJson);
-    const finalJson = walk(nested, transformNode);
-
-    // 3) Return as ProseMirror Node
-    return PMNode.fromJSON(defaultSchema as unknown as Schema, finalJson);
+    const grouped      = groupExpandContent(base);
+    const transformed  = walk(grouped, transformNode);
+    return transformed;
   }
 }
 
-/* ──────────────────────────────────────────────────────────────────────────── */
-/* 1) Preprocess raw Markdown                                                  */
-/* ──────────────────────────────────────────────────────────────────────────── */
+/* ──────────────────────────────────────────────── */
+/* 3. Final sanitiser (schema-strict for Cloud)     */
+/* ──────────────────────────────────────────────── */
+
+function sanitizeMarks(marks?: any[]): any[] | undefined {
+  if (!marks) return undefined;
+  const clean: any[] = [];
+  for (const m of marks) {
+    if (!MARK_TYPE_WHITELIST.has(m.type)) continue;
+    if (m.type === 'link') {
+      const allowed = new Set(MARK_ATTR_WHITELIST.link);
+      for (const k of Object.keys(m.attrs ?? {})) {
+        if (m.attrs[k] === '' || m.attrs[k] == null || !allowed.has(k)) delete m.attrs[k];
+      }
+      if (!m.attrs || Object.keys(m.attrs).length === 0) delete m.attrs;
+    }
+    clean.push(m);
+  }
+  return clean.length ? clean : undefined;
+}
+
+function finalSanitize(node: any): any {
+  if (Array.isArray(node)) {
+    const arr = node.map(finalSanitize).filter(Boolean);
+    return arr.length ? arr : null;
+  }
+  if (node && typeof node === 'object') {
+    if (node.type === 'text') {
+      const txt = stripHtml(node.text || '').trim();
+      return txt ? { ...node, text: txt } : null;
+    }
+    if (node.content) {
+      node.content = finalSanitize(node.content);
+      if (!node.content || node.content.length === 0) return null;
+    }
+    if (node.marks) node.marks = sanitizeMarks(node.marks);
+
+    if (node.attrs) {
+      const allowed = new Set(ATTR_WHITELIST[node.type] || []);
+      for (const k of Object.keys(node.attrs)) {
+        const val = node.attrs[k];
+        if (val === '' || val == null || !allowed.has(k)) delete node.attrs[k];
+      }
+      if (Object.keys(node.attrs).length === 0) delete node.attrs;
+    }
+
+    // ────── FIXED codeBlock: normalize newlines, keep single text node ──────
+    if (node.type === 'codeBlock') {
+      const textNode = node.content?.[0];
+      if (textNode?.type === 'text') {
+        textNode.text = textNode.text.replace(/\r\n?/g, '\n');
+      }
+      const lang = node.attrs?.language;
+      if (!lang || !SAFE_LANGS.has(lang)) {
+        delete node.attrs.language;
+      }
+    }
+  }
+  return node;
+}
+
+/* ──────────────────────────────────────────────── */
+/* 4. Pre-parse cleanup & remark helpers            */
+/* ──────────────────────────────────────────────── */
 function preprocess(md: string): string {
   return md
-    // CDATA → fenced code block
-    .replace(/<!\[CDATA\[(.*?)\]\]>/gs, (_m, inner) =>
-      `\n\n\`\`\`\n${inner.trim()}\n\`\`\`\n\n`
-    )
-    // <procedure> … </procedure> → BODY placeholder sequence
+    .replace(/<!\[CDATA\[(.*?)\]\]>/gs, (_, inner) => `\n\n\`\`\`\n${inner.trim()}\n\`\`\`\n\n`)
     .replace(
       /<procedure[^>]*id="([^"]*)"[^>]*title="([^"]*)"[^>]*>([\s\S]*?)<\/procedure>/gi,
-      (_m, id, title, inner) =>
+      (_, id, title, inner) =>
         `\n\n@@PROCEDURE_BODY:${id}:${title}@@\n\n${inner.trim()}\n\n@@PROCEDURE_END@@\n\n`
     )
-    // <include> → placeholder
     .replace(
       /<include[^>]*from="([^"]*)"[^>]*element-id="([^"]*)".*?>/gi,
-      (_m, from, el) => `\n\n@@INCLUDE:${from}:${el}@@\n\n`
+      (_, from, el) => `\n\n@@INCLUDE:${from}:${el}@@\n\n`
     )
-    // <tabs> … </tabs> → placeholders for multiBodiedExtension
-    .replace(/<tabs[^>]*>([\s\S]*?)<\/tabs>/gi, (_m, inner) => {
+    .replace(/<tabs[^>]*>([\s\S]*?)<\/tabs>/gi, (_, inner) => {
       const tabs = inner.match(/<tab[^>]*title="([^"]+)"[^>]*>([\s\S]*?)<\/tab>/gi);
       if (!tabs) return '\n\n@@TABS_EMPTY@@\n\n';
       const seq: string[] = ['@@TABS_START@@'];
       tabs.forEach((tab: string) => {
-        const [, ttl, body] =
-          /<tab[^>]*title="([^"]+)"[^>]*>([\s\S]*?)<\/tab>/i.exec(tab)!;
+        const [, ttl, body] = /<tab[^>]*title="([^"]+)"[^>]*>([\s\S]*?)<\/tab>/i.exec(tab)!;
         seq.push(`@@TAB_TITLE:${ttl}@@`);
         seq.push(body.trim());
         seq.push('@@TAB_END@@');
@@ -84,43 +174,57 @@ function preprocess(md: string): string {
       seq.push('@@TABS_END@@');
       return `\n\n${seq.join('\n\n')}\n\n`;
     })
-    // <seealso> … </seealso> → placeholder
-    .replace(/<seealso>([\s\S]*?)<\/seealso>/gi, (_m, inner) => {
-      const encoded = inner
-        .match(/<a href="([^"]+)">([^<]+)<\/a>/gi)!
-        .map((link: string) => {
-          const [, href, text] = /<a href="([^"]+)">([^<]+)<\/a>/.exec(link)!;
-          return `${href}|${text}`;
-        })
-        .join(';');
+    .replace(/<seealso>([\s\S]*?)<\/seealso>/gi, (_, inner) => {
+      const links = inner.match(/<a href="([^"]+)">([^<]+)<\/a>/gi) || [];
+      const encoded = links.map((link: string) => {
+        const [, href, text] = /<a href="([^"]+)">([^<]+)<\/a>/.exec(link)!;
+        return `${href}|${text}`;
+      }).join(';');
       return `\n\n@@SEEALSO:${encoded}@@\n\n`;
     })
-    // <img> tags → Markdown images (width preserved via title attribute)
     .replace(
       /<img([^>]*?)src=["']([^"']+)["']([^>]*?)alt=["']([^"']*)["']([^>]*?)\/?>/gi,
-      (_m, pre1, src, pre2, alt, post) => {
+      (_, pre1, src, pre2, alt, post) => {
         const widthMatch = /width=["']?(\d+)/i.exec(pre1 + pre2 + post);
         const title = widthMatch ? ` "${JSON.stringify({ width: widthMatch[1] })}"` : '';
         return `\n\n![${alt}](${src}${title})\n\n`;
       }
     )
-    // inline <code> and <shortcut> → back-tick code
-    .replace(/<code>([\s\S]*?)<\/code>/gi, (_m, inner) => '`' + inner + '`')
-    .replace(/<shortcut[^>]*>([\s\S]*?)<\/shortcut>/gi, (_m, inner) => '`' + inner + '`')
-    // HTML comments → blank lines (handled later by plugin)
+    .replace(/<code>([\s\S]*?)<\/code>/gi, (_, inner) => '`' + inner + '`')
+    .replace(/<shortcut[^>]*>([\s\S]*?)<\/shortcut>/gi, (_, inner) => '`' + inner + '`')
     .replace(/<!--[\s\S]*?-->/g, '\n\n')
-    // Drop attribute-only braces
     .replace(/^\s*\{[^}]+\}\s*$/gm, '')
-    // Ensure blank line after headings
-    .replace(/^(#{1,6} .+?)\n(?!\n)/gm, '$1\n\n');
+    .replace(/^(#{1,6} .+?)\n(?!\n)/gm, '$1\n\n')
+    .replace(/<panel type="(\w+)">([\s\S]*?)<\/panel>/gi, (_, type, content) =>
+      `\n\n@@PANEL:${type}:${content.trim()}@@\n\n`
+    )
+    .replace(/<taskList>([\s\S]*?)<\/taskList>/gi, (_, inner) => {
+      const items = inner.match(/<taskItem state="(\w+)">([\s\S]*?)<\/taskItem>/gi) || [];
+      const seq = ['@@TASK_START@@'];
+      items.forEach((item: string) => {
+        const [, state, content] = /<taskItem state="(\w+)">([\s\S]*?)<\/taskItem>/i.exec(item)!;
+        seq.push(`@@TASK_ITEM:${state}:${content.trim()}@@`);
+      });
+      seq.push('@@TASK_END@@');
+      return `\n\n${seq.join('\n')}\n\n`;
+    })
+    .replace(/<decisionList>([\s\S]*?)<\/decisionList>/gi, (_, inner) => {
+      const items = inner.match(/<decisionItem>([\s\S]*?)<\/decisionItem>/gi) || [];
+      const seq = ['@@DECISION_START@@'];
+      items.forEach((item: string) => {
+        const content = /<decisionItem>([\s\S]*?)<\/decisionItem>/i.exec(item)![1];
+        seq.push(`@@DECISION_ITEM:${content.trim()}@@`);
+      });
+      seq.push('@@DECISION_END@@');
+      return `\n\n${seq.join('\n')}\n\n`;
+    })
+    .replace(/<date timestamp="(\d+)"\s*\/>/gi, (_, timestamp) =>
+      `\n\n@@DATE:${timestamp}@@\n\n`);
 }
 
-/* ──────────────────────────────────────────────────────────────────────────── */
-/* 2) Remark plugin: preserve HTML comments as code blocks (lang: "comment")   */
-/* ──────────────────────────────────────────────────────────────────────────── */
 function remarkPreserveComments() {
   return (tree: any) => {
-    visit(tree, 'html', (node: any, index?: number, parent?: any): void => {
+    visit(tree, 'html', (node: any, index?: number, parent?: any) => {
       if (!parent || !node.value.startsWith('<!--')) return;
       const content = node.value.replace(/^<!--|-->$/g, '').trim();
       parent.children.splice(index!, 1, {
@@ -132,26 +236,21 @@ function remarkPreserveComments() {
   };
 }
 
-/* ──────────────────────────────────────────────────────────────────────────── */
-/* 3) Walk ADF JSON and apply transformNode to every node                      */
-/* ──────────────────────────────────────────────────────────────────────────── */
-function walk(n: any, fn: (x: any, parent?: any) => any, parent?: any): any {
-  const mapped = fn({ ...n }, parent);
-  if (mapped && mapped.content) {
-    mapped.content = mapped.content
-      .map((c: any) => walk(c, fn, mapped))
-      .filter(Boolean);
-  }
+/* ──────────────────────────────────────────────── */
+/* 5. Structural transforms (unchanged)            */
+/* ──────────────────────────────────────────────── */
+
+function walk(n: any, fn: (x: any, p?: any) => any, p?: any): any {
+  const mapped = fn({ ...n }, p);
+  if (mapped?.content) mapped.content = mapped.content
+    .map((c: any) => walk(c, fn, mapped))
+    .filter(Boolean);
   return mapped;
 }
 
-/* ──────────────────────────────────────────────────────────────────────────── */
-/* 4) Post-process: group paragraphs under expand nodes                        */
-/* ──────────────────────────────────────────────────────────────────────────── */
 function groupExpandContent(doc: any): any {
   for (let i = 0; i < doc.content.length - 1; i++) {
-    const node = doc.content[i];
-    const next = doc.content[i + 1];
+    const node = doc.content[i], next = doc.content[i + 1];
     if (node.type === 'expand' && next.type === 'paragraph') {
       node.content = next.content;
       doc.content.splice(i + 1, 1);
@@ -160,24 +259,16 @@ function groupExpandContent(doc: any): any {
   return doc;
 }
 
-/* ──────────────────────────────────────────────────────────────────────────── */
-/* 5) transformNode: convert placeholders, clean empties, etc.                 */
-/* ──────────────────────────────────────────────────────────────────────────── */
 function transformNode(node: any, parent?: any): any {
-  /* ──────────── Bodied procedure ──────────── */
-  if (
-    node.type === 'paragraph' &&
-    node.content?.[0]?.text?.startsWith('@@PROCEDURE_BODY:')
-  ) {
+  // Handle Writerside extensions
+  if (node.type === 'paragraph' && node.content?.[0]?.text?.startsWith('@@PROCEDURE_BODY:')) {
     const [, id, title] = node.content[0].text.split(':');
     const body: any[] = [];
     let idx = parent!.content.indexOf(node) + 1;
-    while (
-      parent!.content[idx]?.content?.[0]?.text !== '@@PROCEDURE_END@@'
-    ) {
+    while (parent!.content[idx]?.content?.[0]?.text !== '@@PROCEDURE_END@@') {
       body.push(parent!.content.splice(idx, 1)[0]);
     }
-    parent!.content.splice(idx, 1); // remove END marker
+    parent!.content.splice(idx, 1);
     return {
       type: 'bodiedExtension',
       attrs: {
@@ -189,59 +280,39 @@ function transformNode(node: any, parent?: any): any {
     };
   }
 
-  /* ──────────── Tabs container (multiBodiedExtension) ──────────── */
-  if (
-    node.type === 'paragraph' &&
-    node.content?.[0]?.text === '@@TABS_START@@'
-  ) {
+  // Handle tabs container
+  if (node.type === 'paragraph' && node.content?.[0]?.text === '@@TABS_START@@') {
     const idxStart = parent!.content.indexOf(node);
     const tabBodies: any[] = [];
     const titles: string[] = [];
 
-    // Walk forward, collect titles and their bodies
     let idx = idxStart + 1;
-    while (
-      parent!.content[idx] &&
-      parent!.content[idx].content?.[0]?.text !== '@@TABS_END@@'
-    ) {
-      // title placeholder
+    while (parent!.content[idx]?.content?.[0]?.text !== '@@TABS_END@@') {
       const titlePar = parent!.content[idx];
       const match = titlePar?.content?.[0]?.text.match(/^@@TAB_TITLE:(.+)@@$/);
       if (match) {
         titles.push(match[1]);
-        parent!.content.splice(idx, 1); // remove title placeholder
+        parent!.content.splice(idx, 1);
         const body: any[] = [];
-        // collect until TAB_END or next title/TABS_END
         while (
           parent!.content[idx] &&
-          !(
-            parent!.content[idx].content?.[0]?.text?.startsWith('@@TAB_TITLE:') ||
-            parent!.content[idx].content?.[0]?.text === '@@TAB_END@@' ||
-            parent!.content[idx].content?.[0]?.text === '@@TABS_END@@'
-          )
+          !parent!.content[idx].content?.[0]?.text?.startsWith('@@TAB_') &&
+          !parent!.content[idx].content?.[0]?.text?.startsWith('@@TABS_END@@')
         ) {
           body.push(parent!.content.splice(idx, 1)[0]);
         }
-        if (
-          parent!.content[idx]?.content?.[0]?.text === '@@TAB_END@@'
-        ) {
-          parent!.content.splice(idx, 1); // remove TAB_END
+        if (parent!.content[idx]?.content?.[0]?.text === '@@TAB_END@@') {
+          parent!.content.splice(idx, 1);
         }
         tabBodies.push({ type: 'extensionBody', content: body });
       } else {
-        // Safety valve: skip
         idx++;
       }
     }
 
-    // remove @@TABS_END@@
-    if (
-      parent!.content[idx] &&
-      parent!.content[idx].content?.[0]?.text === '@@TABS_END@@'
-    ) {
+    if (parent!.content[idx]?.content?.[0]?.text === '@@TABS_END@@') {
       parent!.content.splice(idx, 1);
     }
-    // remove @@TABS_START@@ (it is current node)
     parent!.content.splice(idxStart, 1);
 
     return {
@@ -255,28 +326,12 @@ function transformNode(node: any, parent?: any): any {
     };
   }
 
-  /* ──────────── Inline placeholders ──────────── */
+  // Handle inline placeholders
   if (node.type === 'paragraph' && node.content?.length === 1) {
     const text = node.content[0].text as string;
 
-    // Procedure (inline, very rare)
-    const procMatch = text.match(/^@@PROCEDURE:([^:]+):(.+?)@@$/);
-    if (procMatch) {
-      const [, id, title] = procMatch;
-      return {
-        type: 'extension',
-        attrs: {
-          extensionType: 'com.writerside',
-          extensionKey: 'procedure',
-          parameters: { id, title },
-        },
-      };
-    }
-
-    // Include
-    const includeMatch = text.match(/^@@INCLUDE:([^:]+):([^:]+)@@$/);
-    if (includeMatch) {
-      const [, from, elementId] = includeMatch;
+    if (text.startsWith('@@INCLUDE:')) {
+      const [, from, elementId] = text.split(':');
       return {
         type: 'extension',
         attrs: {
@@ -287,8 +342,7 @@ function transformNode(node: any, parent?: any): any {
       };
     }
 
-    // Empty tabs (edge case)
-    if (text.trim() === '@@TABS_EMPTY@@') {
+    if (text === '@@TABS_EMPTY@@') {
       return {
         type: 'multiBodiedExtension',
         attrs: {
@@ -299,10 +353,8 @@ function transformNode(node: any, parent?: any): any {
       };
     }
 
-    // See-also placeholder
-    const seeMatch = text.match(/^@@SEEALSO:(.+)@@$/);
-    if (seeMatch) {
-      const links = seeMatch[1].split(';').map((pair) => {
+    if (text.startsWith('@@SEEALSO:')) {
+      const links = text.replace('@@SEEALSO:', '').split(';').map(pair => {
         const [href, label] = pair.split('|');
         return { href, label };
       });
@@ -315,37 +367,107 @@ function transformNode(node: any, parent?: any): any {
         },
       };
     }
+
+    if (text.startsWith('@@PANEL:')) {
+      const [, panelType, content] = text.split(':');
+      return {
+        type: 'panel',
+        attrs: { panelType: panelType.toLowerCase() },
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: content }] }],
+      };
+    }
+
+    if (text.startsWith('@@DATE:')) {
+      const timestamp = parseInt(text.replace('@@DATE:', ''), 10);
+      return { type: 'date', attrs: { timestamp } };
+    }
   }
 
-  /* ──────────── Collapsible headings → expand ──────────── */
+  // Handle task lists
+  if (node.type === 'paragraph' && node.content?.[0]?.text === '@@TASK_START@@') {
+    const idxStart = parent!.content.indexOf(node);
+    const items: any[] = [];
+
+    let idx = idxStart + 1;
+    while (parent!.content[idx]?.content?.[0]?.text !== '@@TASK_END@@') {
+      const item = parent!.content[idx];
+      if (item?.content?.[0]?.text?.startsWith('@@TASK_ITEM:')) {
+        const [, state, content] = item.content[0].text.split(':');
+        items.push({
+          type: 'taskItem',
+          attrs: {
+            localId: `task-${items.length + 1}`,
+            state: state === 'DONE' ? 'DONE' : 'TODO'
+          },
+          content: [{ type: 'text', text: content }]
+        });
+        parent!.content.splice(idx, 1);
+      } else {
+        idx++;
+      }
+    }
+
+    parent!.content.splice(idx, 1); // Remove END marker
+    parent!.content.splice(idxStart, 1); // Remove START marker
+
+    return {
+      type: 'taskList',
+      content: items
+    };
+  }
+
+  // Handle decision lists
+  // Handle decision lists
+  if (
+    node.type === 'paragraph' &&
+    node.content?.[0]?.text === '@@DECISION_START@@'
+  ) {
+    const idxStart = parent!.content.indexOf(node);
+    const items: any[] = [];
+
+    let idx = idxStart + 1;
+    while (parent!.content[idx]?.content?.[0]?.text !== '@@DECISION_END@@') {
+      const item = parent!.content[idx];
+      if (item?.content?.[0]?.text?.startsWith('@@DECISION_ITEM:')) {
+        const raw = item.content[0].text.replace('@@DECISION_ITEM:', '');
+        items.push({
+          type: 'decisionItem',
+          attrs: { localId: `dec-${items.length + 1}` },
+          content: [
+            {
+              type: 'paragraph',
+              content: [{ type: 'text', text: raw }]
+            }
+          ]
+        });
+        parent!.content.splice(idx, 1);          // remove processed marker
+      } else {
+        idx++;                                   // skip anything unexpected
+      }
+    }
+
+    parent!.content.splice(idx, 1);              // remove @@DECISION_END@@
+    parent!.content.splice(idxStart, 1);         // remove @@DECISION_START@@
+
+    return { type: 'decisionList', content: items };
+  }
+
+  // Handle collapsible headings
   if (node.type === 'heading' && node.content?.[0]?.text) {
     const m = node.content[0].text.match(/^(.*)\s+\{collapsible="true"\}$/);
     if (m) {
       return {
         type: 'expand',
-        attrs: { title: m[1] }, // collapsed by default (no expanded attr)
+        attrs: { title: m[1] },
         content: [],
       };
     }
   }
 
-  /* ──────────── Code blocks: ensure language / comment marker ──────────── */
-  if (node.type === 'codeBlock') {
-    return {
-      type: 'codeBlock',
-      attrs: { language: node.attrs?.language ?? '' },
-      content: node.content,
-    };
-  }
-
-  /* ──────────── Strip empty paragraphs anywhere ──────────── */
-  if (node.type === 'paragraph' && (!node.content || node.content.length === 0))
-    return null;
-
-  /* ──────────── Strip attribute-only paragraphs ──────────── */
-  if (
-    node.type === 'paragraph' &&
-    node.content?.every((c: any) => c.type === 'text') &&
+  // Clean empty nodes
+  if (node.type === 'paragraph' && (!node.content || node.content.length === 0)) return null;
+  if (node.type === 'paragraph' &&
+    node.content.every((c: any) => c.type === 'text') &&
     /^\{[^}]+\}$/.test(node.content.map((c: any) => c.text).join('').trim())
   ) {
     return null;

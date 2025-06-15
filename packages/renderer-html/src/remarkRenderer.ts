@@ -1,25 +1,37 @@
 // src/utils/remarkRenderer.ts
-import { MarkdownTransformer } from '@atlaskit/editor-markdown-transformer';
-import { defaultSchema } from '@atlaskit/adf-schema/schema-default';
+import { markdownToAdf } from 'marklassian';
 import { WritersideMarkdownTransformer } from './writerside-markdown-transformer';
-
-
+// import { defaultSchema } from '@atlaskit/adf-schema/dist/types/schema/default-schema';
+import { defaultSchema } from '@atlaskit/adf-schema/schema-default';
 /**
- * Renders Markdown to HTML using remark + rehype, injecting line data via scrollSyncPlugin.
- * The final HTML is wrapped with additional CSS and a script to support two-way scroll sync.
+ * Converts Markdown → ADF (via marklassian) and wraps the JSON
+ * with CSS + two-way scroll-sync script for the VS Code preview.
  */
 export async function renderContent(markdown: string): Promise<string> {
-  const transformer = new WritersideMarkdownTransformer(defaultSchema);
-  // const transformer = new MarkdownTransformer(defaultSchema);
-  const adfDocument = transformer.parse(markdown);
+  // const adfDoc = markdownToAdf(markdown);          // returns plain ADF object
+  // const jsonString = JSON.stringify(adfDoc);       // serialise for embedding
+  // const escapedJson = jsonString.replace(/(?<!\\)"/g, '\\"');
+  // console.log(escapedJson)
+  // return wrapWithSyncScript(jsonString);
 
+  const transformer = new WritersideMarkdownTransformer(defaultSchema);
+  // // const transformer = new MarkdownTransformer(defaultSchema);
+  // const adfDocument = transformer.parse(markdown).toJSON();
+  // adfDocument.version = 1;
+  // const json_string = JSON.stringify(adfDocument, (_k, v) => v === null ? undefined : v);
+  // const json_string = JSON.stringify(adfDocument)
+
+  const json_string = JSON.stringify(transformer.toADF(markdown));
+
+  const escapedJson = json_string.replace(/(?<!\\)"/g, '\\"');
+  console.log(escapedJson)
   // Wrap the generated HTML with the embedded script and updated CSS for two-way scroll sync.
-  return wrapWithSyncScript(JSON.stringify(adfDocument.toJSON()));
+  return wrapWithSyncScript(json_string);
 }
 
 /**
- * Wraps the rendered HTML with additional CSS (including a vertical line for the active line)
- * and an embedded script for two-way scroll sync.
+ * Wraps the rendered content with styling and the embedded script
+ * that keeps editor ↔ preview scroll positions in sync.
  */
 function wrapWithSyncScript(innerHtml: string): string {
   return `<!DOCTYPE html>
@@ -31,8 +43,6 @@ function wrapWithSyncScript(innerHtml: string): string {
       margin: 0;
       padding: 1rem;
     }
-    /* Active line gets a vertical line on the left.
-       It uses the VS Code theme variable for scrollbar slider active background. */
     .code-active-line {
       position: relative;
     }
@@ -91,19 +101,16 @@ function wrapWithSyncScript(innerHtml: string): string {
     }
 
     function markActiveLine(line) {
-  if (currentActive) {
-    currentActive.classList.remove('code-active-line');
-  }
-  const closest = findClosestLine(line);
-  if (closest) {
-    closest.el.classList.add('code-active-line');
-    currentActive = closest.el;
-    // Smooth scroll such that the active line is at the top of the preview.
-    const targetTop = closest.top;
-    window.scrollTo({ top: targetTop, behavior: 'smooth' });
-  }
-}
-
+      if (currentActive) {
+        currentActive.classList.remove('code-active-line');
+      }
+      const closest = findClosestLine(line);
+      if (closest) {
+        closest.el.classList.add('code-active-line');
+        currentActive = closest.el;
+        window.scrollTo({ top: closest.top, behavior: 'smooth' });
+      }
+    }
 
     document.addEventListener('toggle', (event) => {
       if (event.target.tagName === 'DETAILS') {
