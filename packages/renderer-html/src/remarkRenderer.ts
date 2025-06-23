@@ -2,7 +2,7 @@
 import { markdownToAdf } from 'marklassian';
 import { WritersideMarkdownTransformer } from './writerside-markdown-transformer';
 // import { defaultSchema } from '@atlaskit/adf-schema/dist/types/schema/default-schema';
-import { defaultSchema } from '@atlaskit/adf-schema/schema-default';
+
 /**
  * Converts Markdown → ADF (via marklassian) and wraps the JSON
  * with CSS + two-way scroll-sync script for the VS Code preview.
@@ -14,7 +14,7 @@ export async function renderContent(markdown: string): Promise<string> {
   // console.log(escapedJson)
   // return wrapWithSyncScript(jsonString);
 
-  const transformer = new WritersideMarkdownTransformer(defaultSchema);
+  const transformer = new WritersideMarkdownTransformer();
   // // const transformer = new MarkdownTransformer(defaultSchema);
   // const adfDocument = transformer.parse(markdown).toJSON();
   // adfDocument.version = 1;
