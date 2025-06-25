@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import axios from 'axios';
 import FormData from 'form-data';
+import sizeOf from 'image-size';
 import { v4 as uuidv4 } from 'uuid';
 
 export interface ConfluenceCfg {
@@ -30,19 +31,19 @@ interface AttachmentResponse {
 /**
  * Uploads an PNG. On duplicate-filename error, falls back to ensureAttachment.
  */
-export async function uploadPng(
+export async function uploadImages(
   cfg: ConfluenceCfg,
   pageId: string,
-  pngPath: string
+  cacheImagesPath: string
 ): Promise<UploadResult> {
-  const fileName = path.basename(pngPath);
+  const fileName = path.basename(cacheImagesPath);
   const url = `${cfg.baseUrl}/wiki/rest/api/content/${pageId}/child/attachment`;
-  const pngContent = await fs.promises.readFile(pngPath);
+  const pngContent = await fs.promises.readFile(cacheImagesPath);
 
   const form = new FormData();
   form.append('file', pngContent, {
     filename: fileName,
-    contentType: 'image/png+xml',
+    contentType: 'image/png', // todo
     knownLength: pngContent.length,
   });
 
@@ -76,7 +77,7 @@ export async function uploadPng(
       err.response.data.message.includes('same file name');
     if (isDuplicateError) {
       console.warn(`Attachment "${fileName}" already exists; fetching existing mediaId…`);
-      return ensureAttachment(cfg, pageId, pngPath);
+      return ensureAttachment(cfg, pageId, cacheImagesPath);
     }
 
     if (axios.isAxiosError(err)) {
@@ -134,42 +135,94 @@ export async function ensureAttachment(
  * Walks the ADF and replaces ATTACH-STUB placeholders with proper media nodes.
  * Ensures each media node has attrs.id, type, collection and occurrenceKey.
  */
+
+
+
+
 export function injectMediaNodes(
   adf: any,
   map: Record<string, string>,
-  pageId: string
+  pageId: string,
+  imageDir: string
 ): any {
   const walk = (node: any): any => {
-    if (Array.isArray(node)) return node.map(walk);
-    if (node && typeof node === 'object') {
-      if (
-        node.type === 'paragraph' &&
-        node.content?.length === 1 &&
-        node.content[0].type === 'text' &&
-        node.content[0].text.startsWith('ATTACH-STUB:')
-      ) {
-        const file = node.content[0].text.slice(12, -2); // node = ATTACH-STUB:xxxx.png@@, 'ATTACH-STUB:'.length = 12
-        const mediaId = map[file];
-        if (!mediaId) {
-          console.warn(`⚠️  No mediaId found for file: "${file}"`);
+    if (Array.isArray(node)) return node.map(walk).filter(Boolean);
+    if (!node || typeof node !== 'object') return node;
+
+    // Handle your ATTACH‐STUB case
+    if (
+      node.type === 'paragraph' &&
+      node.content?.[0]?.type === 'text' &&
+      node.content[0].text.startsWith('ATTACH-STUB:')
+    ) {
+      const raw = node.content[0].text.slice(12, -2);
+      const [file, paramString = ''] = raw.split('|');
+      const mediaId = map[file];
+      if (!mediaId) console.warn(`No mediaId for ${file}`);
+
+      // parse width from params
+      const params = Object.fromEntries(
+        paramString.split(';').map((p: string) => p.split('=').map((s: string) => s.trim()))
+      );
+      const width = params.width ? Number(params.width) : undefined;
+
+      // compute height if width given
+      let height: number | undefined;
+      if (width) {
+        try {
+          // Read the image into a Buffer so sizeOf() accepts it
+          const fullPath = path.join(imageDir, file);
+          const buffer = fs.readFileSync(fullPath);
+          const dims = sizeOf(buffer);
+          if (dims.width && dims.height) {
+            height = Math.round((dims.height / dims.width) * width);
+          }
+        } catch (e) {
+          console.warn(`⚠️  Cannot determine dimensions for "${file}":`, e);
         }
-        return {
-          type: 'mediaSingle',
-          attrs: { layout: 'center' },
-          content: [{
-            type: 'media',
-            attrs: {
-              id: mediaId,
-              type: 'file',
-              collection: `contentId-${pageId}`,
-              occurrenceKey: uuidv4(),
-            }
-          }]
-        };
       }
-      if (node.content) node.content = walk(node.content);
+
+      return {
+        type: 'mediaSingle',
+        attrs: { layout: 'center' },
+        content: [{
+          type: 'media',
+          attrs: {
+            id: mediaId,
+            type: 'file',
+            collection: `contentId-${pageId}`,
+            occurrenceKey: uuidv4(),
+            ...(width !== undefined && { width }),
+            ...(height !== undefined && { height }),
+          }
+        }]
+      };
     }
+
+    // existing external→file logic...
+    if (
+      node.type === 'mediaSingle' &&
+      node.content?.[0]?.type === 'media' &&
+      node.content[0].attrs.type === 'external'
+    ) {
+      const media = node.content[0];
+      const file = path.basename(media.attrs.url);
+      const mediaId = map[file];
+      if (!mediaId) console.warn(`No mediaId for ${file}`);
+      media.attrs = {
+        id: mediaId,
+        type: 'file',
+        collection: `contentId-${pageId}`,
+        occurrenceKey: uuidv4(),
+      };
+    }
+
+    if (node.content) node.content = walk(node.content);
     return node;
   };
+
   return walk(adf);
 }
+
+
+// <img src="completion_procedure.png" alt="completion suggestions for procedure" border-effect="line"/> // not supported

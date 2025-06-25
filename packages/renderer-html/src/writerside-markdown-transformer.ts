@@ -1,7 +1,7 @@
 /* writerside-markdown-transformer.ts
  * Fully offline PlantUML & Mermaid support (optimized drop-in replacement):
  *  - Detects ```plantuml``` / ```mermaid``` blocks
- *  - Uses Java + PlantUML or Mermaid CLI to generate SVG via STDIN
+ *  - Uses Java + PlantUML or Mermaid CLI to generate PNG via STDIN
  *  - Caches paths and temp directory for performance
  *  - Replaces blocks with Markdown image links
  *  - Integrates into existing ADF pipeline
@@ -86,23 +86,23 @@ function defaultDiagramGenerator(
 ): string {
   // 1 ️⃣  Derive a deterministic file name
   const contentHash = hashString(code);
-  const outPath     = path.join(WORK_DIR, `${contentHash}.png`);
+  const outPath = path.join(WORK_DIR, `${contentHash}.png`);
 
   // 2 ️⃣  Short-circuit if we already have a valid PNG
   if (fs.existsSync(outPath)) {
-  const fd = fs.openSync(outPath, 'r');
-  try {
-    const sigBuf = Buffer.alloc(8);
-    fs.readSync(fd, sigBuf, 0, 8, 0);
-    // compare to PNG signature:
-    if (sigBuf.equals(Buffer.from([0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A]))) {
-      return outPath;
+    const fd = fs.openSync(outPath, 'r');
+    try {
+      const sigBuf = Buffer.alloc(8);
+      fs.readSync(fd, sigBuf, 0, 8, 0);
+      // compare to PNG signature:
+      if (sigBuf.equals(Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]))) {
+        return outPath;
+      }
+    } finally {
+      fs.closeSync(fd);
     }
-  } finally {
-    fs.closeSync(fd);
+    fs.unlinkSync(outPath);
   }
-  fs.unlinkSync(outPath);
-}
   // 3 ️⃣  Generate the diagram in PNG **directly**
   if (lang === 'plantuml') {
     // -tpng tells PlantUML to output PNG to stdout
@@ -246,9 +246,9 @@ function preprocess(
       /```(plantuml|mermaid)[^\n]*\n([\s\S]*?)```/gi,
       (_, lang: 'plantuml' | 'mermaid', code: string) => {
         try {
-          const svgPath = diagramGenerator(lang, code.trim());
-          const file    = path.basename(svgPath);            // NEW
-          return `\n\n@@ATTACH:${file}@@\n\n`;               // NEW
+          const pngPath = diagramGenerator(lang, code.trim());
+          const file = path.basename(pngPath);
+          return `\n\n@@ATTACH:${file}@@\n\n`;
         } catch (e) {
           console.error(`Diagram generation failed (${lang}):`, e);
           return _;
@@ -317,7 +317,17 @@ function preprocess(
       }), '@@DECISION_END@@'];
       return `\n\n${out.join('\n')}\n\n`;
     })
-    .replace(/<date timestamp="(\d+)"\s*\/>/gi, (_, ts) => `\n\n@@DATE:${ts}@@\n\n`);
+    .replace(/<date timestamp="(\d+)"\s*\/>/gi, (_, ts) => `\n\n@@DATE:${ts}@@\n\n`)
+    .replace(
+      /!\[([^\]]+)\]\(([^)]+)\)((?:\s*\{[^}]+\})+)/g,
+      (_, _alt, url, braces) => {
+        // collect the inner bits "width=290" and "border-effect=line"
+        const params = [...braces.matchAll(/\{([^}]+)\}/g)]
+          .map(m => m[1].trim())
+          .join(';');
+        const file = path.basename(url);
+        return `\n\n@@ATTACH:${file}|${params}@@\n\n`;
+      });
 }
 
 /* ──────────────────────────────────────────────────────────────── */

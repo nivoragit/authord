@@ -6,41 +6,66 @@ import os from 'os';
 import axios from 'axios';
 import readline from 'readline';
 import { WritersideMarkdownTransformer } from '@authord/renderer-html';
-import { ConfluenceCfg, injectMediaNodes, uploadPng } from './utils/confluence-utils';
+import { ConfluenceCfg, injectMediaNodes, uploadImages } from './utils/confluence-utils';
 
 async function main() {
-  const [ , , mdPath, pageId ] = process.argv;
-  if (!mdPath || !pageId) {
-    console.error('Usage: publish.ts <markdown-file> <confluence-page-id>');
+  const [ , , mdPathOrDir, imagesPath, pageId ] = process.argv;
+  if (!mdPathOrDir || !imagesPath || !pageId) {
+    console.error('Usage: publish.ts <markdown-file-or-dir> <images-dir> <confluence-page-id>');
     process.exit(1);
   }
 
-  // 1. Read the Markdown file
-  const md = await fs.readFile(mdPath, 'utf8');
+  // 1) Discover MD files
+  let mdFiles: string[];
+  const stat = await fs.stat(mdPathOrDir);
+  if (stat.isDirectory()) {
+    // get all .md in directory, sort alphabetically
+    mdFiles = (await fs.readdir(mdPathOrDir))
+      .filter(f => f.endsWith('.md'))
+      .map(f => path.join(mdPathOrDir, f))
+      .sort();
+  } else {
+    mdFiles = [mdPathOrDir];
+  }
 
-  // 2. Transform Markdown → ADF (this also generates PNGs)
+  if (mdFiles.length === 0) {
+    console.error('No Markdown files found.');
+    process.exit(1);
+  }
+
+  // 2) Read and concatenate—or transform and merge—your files
   const transformer = new WritersideMarkdownTransformer();
-  const adf = transformer.toADF(md);
+  const allMd = (
+    await Promise.all(mdFiles.map(f => fs.readFile(f, 'utf8')))
+  ).join('\n\n---\n\n');
+  const adf = transformer.toADF(allMd);
 
-  // 3. Locate generated PNGs
-  const pngDir = path.join(os.tmpdir(), 'writerside-diagrams');
+  // 3) Prepare cache directory and copy images
+  const cacheImagesDir = path.join(os.tmpdir(), 'writerside-diagrams');
+  await fs.mkdir(cacheImagesDir, { recursive: true });
+  const imageFiles = await fs.readdir(imagesPath);
+  for (const img of imageFiles) {
+    const src = path.join(imagesPath, img);
+    const dest = path.join(cacheImagesDir, img);
+    await fs.copyFile(src, dest);
+  }
+
+  // 4) Locate generated PNGs
   let pngs: string[];
   try {
-    pngs = await fs.readdir(pngDir);
+    pngs = await fs.readdir(cacheImagesDir);
   } catch {
-    console.error(`PNG directory not found: ${pngDir}`);
+    console.error(`PNG directory not found: ${cacheImagesDir}`);
     process.exit(1);
   }
 
-  // 4. Confirm upload
-  console.log(`\nPNG files generated in: ${pngDir}`);
-  console.log('Found the following PNG files:');
+  // 5) Confirm upload
+  console.log(`\nPNG files in: ${cacheImagesDir}`);
   pngs.forEach(png => console.log(`  - ${png}`));
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   const answer: string = await new Promise(resolve => {
     rl.question('\nProceed with upload? (Y/n) ', input => {
-      rl.close();
-      resolve(input.trim());
+      rl.close(); resolve(input.trim());
     });
   });
   if (answer.toLowerCase().startsWith('n')) {
@@ -48,34 +73,33 @@ async function main() {
     process.exit(0);
   }
 
-  // 5. Confluence credentials
+  // 6) Confluence credentials
   const cfg: ConfluenceCfg = {
     baseUrl : process.env.CONF_BASE_URL as string,
     email   : process.env.CONF_USER     as string,
     apiToken: process.env.CONF_TOKEN    as string,
   };
 
-  // 6. Upload PNGs & build map
+  // 7) Upload PNGs & build map
   const fileToMedia: Record<string,string> = {};
   for (const png of pngs) {
     console.log(`Uploading ${png}...`);
-    const { file, mediaId } = await uploadPng(cfg, pageId, path.join(pngDir, png));
+    const { file, mediaId } = await uploadImages(cfg, pageId, path.join(cacheImagesDir, png));
     fileToMedia[file] = mediaId;
   }
-  // 7. Inject mediaSingle/media nodes (now includes attrs.id)
-  const finalAdf = injectMediaNodes(adf, fileToMedia, pageId);
 
-  // 8. Fetch page metadata for version bump
+  // 8) Inject mediaSingle/media nodes
+  const finalAdf = injectMediaNodes(adf, fileToMedia, pageId, cacheImagesDir);
+
+  // 9) Fetch metadata & bump version
   const pageResp = await axios.get(
     `${cfg.baseUrl}/wiki/rest/api/content/${pageId}?expand=version,title`,
     { auth: { username: cfg.email, password: cfg.apiToken } }
   );
-  const {
-    title,
-    version: { number: currentVersion }
-  } = pageResp.data;
+  const { title, version: { number: currentVersion } } = pageResp.data;
   const nextVersion = currentVersion + 1;
-  // 9. Push updated ADF back to Confluence
+
+  // 10) Push updated ADF
   await axios.put(
     `${cfg.baseUrl}/wiki/rest/api/content/${pageId}`,
     {
@@ -103,3 +127,7 @@ main().catch(err => {
   console.error('❌ Error in publish.ts:', err);
   process.exit(1);
 });
+
+
+
+//todo md fiels need to sort by created date before merge
