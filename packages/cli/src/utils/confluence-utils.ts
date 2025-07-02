@@ -131,6 +131,19 @@ export async function ensureAttachment(
   return { file: fileName, mediaId: latestMediaId };
 }
 
+export async function movePage(
+  cfg:       ConfluenceCfg,
+  pageId:    string,
+  newParent: string
+): Promise<void> {
+  // 'append' will place it as the last child; index ordering changes can be 
+  // detected + reordered via separate API calls if needed.
+  const url = `${cfg.baseUrl}/wiki/rest/api/content/${pageId}/move/append?targetId=${newParent}`;
+  await axios.post(url, null, {
+    auth: { username: cfg.email, password: cfg.apiToken }
+  });
+}
+
 /**
  * Walks the ADF and replaces ATTACH-STUB placeholders with proper media nodes.
  * Ensures each media node has attrs.id, type, collection and occurrenceKey.
