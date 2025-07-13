@@ -46,7 +46,7 @@ export async function readConfig(rootDir: string): Promise<LiteConfig> {
   const configPath = path.join(rootDir, 'authord.config.json');
 
   if (!fs.existsSync(configPath)) {
-    throw new Error('Configuration file not found');
+    throw new Error(`Configuration file not found: ${configPath}`);
   }
 
   try {

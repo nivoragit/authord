@@ -6,6 +6,6 @@
     "composite": true,
     "module": "commonjs"
   },
-  "include": ["src"]
+  "include": ["src", "../cli/src/utils/readConfig.ts"]
   
 }

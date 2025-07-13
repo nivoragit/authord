@@ -1,0 +1,9 @@
+{
+  "baseUrl"      : "https://example.atlassian.net",
+  "email"        : "user@example.com",
+  "apiToken"     : "YOUR_API_TOKEN",
+  "spaceKey"     : "DOCS",
+  "parentPageId" : "11223344",
+  "topicsDir"    : "topics",
+  "imagesDir"    : "images"
+}
