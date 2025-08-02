@@ -237,5 +237,50 @@ export function injectMediaNodes(
   return walk(adf);
 }
 
+export function usedImagesInADF(adf: any): Set<string> {
+  const found = new Set<string>();
+  const walk = (n: any): void => {
+    if (!n || typeof n !== 'object') return;
+    if (Array.isArray(n)) return n.forEach(walk);
+
+    // ATTACH-STUB paragraph
+    if (n.type === 'paragraph' && n.content?.[0]?.text?.startsWith('ATTACH-STUB:')) {
+      const raw = n.content[0].text.slice(12, -2);
+      found.add(raw.split('|')[0]);               // file name before “|…”
+    }
+
+    // external mediaSingle
+    if (n.type === 'mediaSingle' && n.content?.[0]?.attrs?.type === 'external') {
+      found.add(path.basename(n.content[0].attrs.url));
+    }
+
+    if (n.content) walk(n.content);
+  };
+  walk(adf);
+  return found;
+}
+
+export async function buildPageMediaMap(
+  cfg: ConfluenceCfg,
+  pageId: string,
+  imageDir: string,
+  needed: Iterable<string>,
+): Promise<Record<string,string>> {
+
+  const map: Record<string,string> = {};
+  for (const img of needed) {
+    const abs = path.join(imageDir, img);
+    let mediaId: string;
+    try {
+      ({ mediaId } = await ensureAttachment(cfg, pageId, abs));  // already there?
+    } catch {
+      ({ mediaId } = await uploadImages(cfg, pageId, abs));      // upload now
+    }
+    map[img] = mediaId;
+  }
+  return map;
+}
+
+
 
 // <img src="completion_procedure.png" alt="completion suggestions for procedure" border-effect="line"/> // not supported

@@ -286,12 +286,31 @@ function preprocess(
       return `\n\n@@SEEALSO:${encoded}@@\n\n`;
     })
     .replace(
-      /<img([^>]*?)src=["']([^"']+)["']([^>]*?)alt=["']([^']*)["']([^>]*?)\/?>/gi,
-      (_, pre1, src, pre2, alt, post) => {
-        const width = /width=["']?(\d+)/i.exec(pre1 + pre2 + post)?.[1];
-        const title = width ? ` "${JSON.stringify({ width })}"` : '';
-        return `\n\n![${alt}](${src}${title})\n\n`;
-      }
+      /<img\b([^>]*)\/?>/gi,
+      (_, rawAttrs: string) => {
+        // ① gather all attributes into a map  (src, alt, width, border-effect …)
+        const attrs = Object.fromEntries(
+          [...rawAttrs.matchAll(/([\w-]+)\s*=\s*"(.*?)"/g)]
+            .map(m => [m[1].toLowerCase(), m[2]])
+        );
+
+        const src = attrs.src;                        // required
+        const alt = attrs.alt ?? path.basename(src);  // fall back to file name
+
+        // ② turn *every* remaining attribute into a `k=v` pair
+        delete attrs.src;
+        delete attrs.alt;
+        const params = Object.entries(attrs)
+          .map(([k, v]) => `${k}=${v}`)
+          .join(';');
+
+        /* ③ emit a plain Markdown image that *our own* image-to-stub
+              regex (further down in preprocess) already understands:  
+              ![alt](file){width=290;border-effect=line}
+        */
+        const brace = params ? `{${params}}` : '';
+        return `\n\n![${alt}](${src})${brace}\n\n`;
+      },
     )
     .replace(/<code>([\s\S]*?)<\/code>/gi, (_, i) => '`' + i + '`')
     .replace(/<shortcut[^>]*>([\s\S]*?)<\/shortcut>/gi, (_, i) => '`' + i + '`')
@@ -404,34 +423,34 @@ function transformNode(node: any, parent?: any): any {
   }
 
   // TABS
-  if (isParagraph(node, '@@TABS_START@@')) {
-    const idxStart = parent!.content.indexOf(node);
-    const titles: string[] = [];
-    const tabBodies: any[] = [];
-    let idx = idxStart + 1;
-    while (!isParagraph(parent!.content[idx], '@@TABS_END@@')) {
-      const titlePar = parent!.content[idx];
-      const raw = titlePar?.content?.[0]?.text;
-      if (typeof raw === 'string') {
-        const match = raw.match(/^@@TAB_TITLE:(.+)@@$/);
-        if (match) {
-          titles.push(match[1]);
-          parent!.content.splice(idx, 1);
-          const body: any[] = [];
-          while (!isParagraph(parent!.content[idx], '@@TAB_END@@')) {
-            body.push(parent!.content.splice(idx, 1)[0]);
-          }
-          parent!.content.splice(idx, 1);
-          tabBodies.push({ type: 'extensionBody', content: body });
-          continue;
-        }
-      }
-      idx++;
-    }
-    parent!.content.splice(idx, 1);
-    parent!.content.splice(idxStart, 1);
-    return extension('multiBodiedExtension', 'tabs', { titles }, tabBodies);
-  }
+  // if (isParagraph(node, '@@TABS_START@@')) {
+  //   const idxStart = parent!.content.indexOf(node);
+  //   const titles: string[] = [];
+  //   const tabBodies: any[] = [];
+  //   let idx = idxStart + 1;
+  //   while (!isParagraph(parent!.content[idx], '@@TABS_END@@')) {
+  //     const titlePar = parent!.content[idx];
+  //     const raw = titlePar?.content?.[0]?.text;
+  //     if (typeof raw === 'string') {
+  //       const match = raw.match(/^@@TAB_TITLE:(.+)@@$/);
+  //       if (match) {
+  //         titles.push(match[1]);
+  //         parent!.content.splice(idx, 1);
+  //         const body: any[] = [];
+  //         while (!isParagraph(parent!.content[idx], '@@TAB_END@@')) {
+  //           body.push(parent!.content.splice(idx, 1)[0]);
+  //         }
+  //         parent!.content.splice(idx, 1);
+  //         tabBodies.push({ type: 'extensionBody', content: body });
+  //         continue;
+  //       }
+  //     }
+  //     idx++;
+  //   }
+  //   parent!.content.splice(idx, 1);
+  //   parent!.content.splice(idxStart, 1);
+  //   return extension('multiBodiedExtension', 'tabs', { titles }, tabBodies);
+  // }
 
   // INLINE PLACEHOLDERS
   if (isParagraph(node)) {
@@ -541,16 +560,23 @@ function transformNode(node: any, parent?: any): any {
 
   // convert @@ATTACH into a stub paragraph
   if (
-    node.type === 'paragraph' &&
-    typeof node.content?.[0]?.text === 'string' &&
-    node.content[0].text.startsWith('@@ATTACH:')
-  ) {
-    const file = node.content[0].text.replace('@@ATTACH:', '');
-    return {
-      type: 'paragraph',
-      content: [{ type: 'text', text: `ATTACH-STUB:${file}` }]
-    };
-  }
+  node.type === 'paragraph' &&
+  typeof node.content?.[0]?.text === 'string' &&
+  node.content[0].text.startsWith('@@ATTACH:')
+) {
+  /* NEW 👉 */ const stub = node.content[0].text                         // keep whole stub
+  /* OLD    - const file = node.content[0].text.replace('@@ATTACH:', ''); */
+
+  return {
+    type: 'paragraph',
+    /* NEW 👉 */ content: [{ type: 'text', text: `ATTACH-STUB:${stub.slice('@@ATTACH:'.length)}` }],
+    /*        |                                  └── still ends with “@@” so
+               |                                      injectMediaNodes()’s
+               |                                      .slice(12, -2) logic
+               |                                      continues to work      */
+  };
+}
+
 
   return node;
 }
