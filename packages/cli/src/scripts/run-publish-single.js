@@ -11,9 +11,11 @@ const argv = minimist(process.argv.slice(2), {
   string: [
     'config', 'token', 'project-type',
     'md', 'images', 'space', 'title',
-    'base-url', 'email'
+    'base-url',             // ↩︎ unchanged
+    'user',                 // NEW: --user <username>
+    'username'              // alias for --user in JSON/env
   ],
-  alias: { c: 'config', t: 'token' },
+  alias: { c: 'config', t: 'token', u: 'user' },
 });
 
 function loadJson(file) {
@@ -73,11 +75,11 @@ const imagesSource = pick('images', 'imagesDir', defaults.imagesDir && path.reso
 const spaceKey     = pick('space',  'spaceKey');
 const pageTitle    = pick('title',  'pageTitle', 'Exported Documentation');
 const baseUrl      = pick('base-url','baseUrl');
-const email        = pick('email',   'email');
-const apiToken     = pick('token',   'apiToken');
+const username     = pick('user',   'username');     // ← NEW (Data Center)
+const apiToken     = pick('token',  'apiToken');
 
 /* -------- minimal validation -------- */
-for (const [k, v] of Object.entries({ mdPath, imagesSource, spaceKey, baseUrl, email, apiToken })) {
+for (const [k, v] of Object.entries({ mdPath, imagesSource, spaceKey, baseUrl, username, apiToken })) {
   if (!v) { console.error(`Missing required option: ${k}`); process.exit(1); }
 }
 
@@ -118,9 +120,9 @@ const child = spawn(cmd, args, {
   stdio: 'inherit',
   env: {
     ...process.env,
-    CONF_BASE_URL: baseUrl,
-    CONF_USER:     email,
-    CONF_TOKEN:    apiToken,
+    CONF_BASE_URL : baseUrl,
+    CONF_USERNAME : username,   // NEW
+    CONF_TOKEN    : apiToken,   // PAT or password
   },
 });
 child.on('exit', code => process.exit(code ?? 0));

@@ -1,9 +1,9 @@
 {
-  "baseUrl"      : "https://p19951115.atlassian.net",
-  "email"        : "p19951115@gmail.com",
-  "apiToken"     : "ATATT3xFfGF0ofKuLHwjrSPXw1TeTqbMYDllNvbz7IsDAHF8LCv26ChPipAXCPaYxLBgm_ism5Na1dzgOpNox8dx_R0M6dwsOxqH1oYFZszWMvABsNE0zcFhNfYNPoyIkbzOC6_KSdilEfun7Q6_1f_xTsmgqRA2cCnUxOSZnpeTUXQ5Pu_wL5s=7087A2C8",
-  "spaceKey"     : "tt",
-  "parentPageId" : "19629077",
+  "baseUrl"      : "https://confluence.sumihiran.dev",
+  "username"     : "madushika",
+  "apiToken"     : "MTIxNjk5NDYxNzAxOm/69wd+rGe2znJggSxGjUWj6Vpg",
+  "spaceKey"     : "TEST",
+  "parentPageId" : "360496",
   "topicsDir"    : "topics",
   "imagesDir"    : "images"
 }

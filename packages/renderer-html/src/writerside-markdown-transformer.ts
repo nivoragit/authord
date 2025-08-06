@@ -1,586 +1,239 @@
-/* writerside-markdown-transformer.ts
- * Fully offline PlantUML & Mermaid support (optimized drop-in replacement):
- *  - Detects ```plantuml``` / ```mermaid``` blocks
- *  - Uses Java + PlantUML or Mermaid CLI to generate PNG via STDIN
- *  - Caches paths and temp directory for performance
- *  - Replaces blocks with Markdown image links
- *  - Integrates into existing ADF pipeline
- */
+/**********************************************************************
+ * writerside-markdown-transformer-dc.ts
+ * Confluence Data Center / Server  –  strict-XHTML + auto-copied diagrams
+ * • Detects Mermaid / PlantUML blocks → PNG (cached, deterministic hash)
+ * • Copies/links every generated PNG into IMAGE_DIR so imageSize() works
+ * • Self-closes all void tags (<hr/>, <br/>, …) for XHTML 1.0 validity
+ *********************************************************************/
 
 import { MarkdownTransformer } from '@atlaskit/editor-markdown-transformer';
-import { defaultSchema } from '@atlaskit/adf-schema/schema-default';
-import type { Schema } from 'prosemirror-model';
-import { unified } from 'unified';
-import remarkParse from 'remark-parse';
-import remarkDirective from 'remark-directive';
-import remarkStringify from 'remark-stringify';
-import { visit } from 'unist-util-visit';
-import { execFileSync } from 'child_process';
-import * as fs from 'fs';
-import * as path from 'path';
-import { tmpdir, homedir } from 'os';
+import { defaultSchema }       from '@atlaskit/adf-schema/schema-default';
+import type { Schema }         from 'prosemirror-model';
 
-/* ──────────────────────────────────────────────────────────────── */
-/* 1. Constants & helpers                                           */
-/* ──────────────────────────────────────────────────────────────── */
+import { unified }             from 'unified';
+import remarkParse             from 'remark-parse';
+import remarkDirective         from 'remark-directive';
+import remarkGfm               from 'remark-gfm';
+import remarkStringify         from 'remark-stringify';
+import remarkRehype            from 'remark-rehype';
+import rehypeStringify         from 'rehype-stringify';
+import rehypeRaw               from 'rehype-raw';
+import { visit }               from 'unist-util-visit';
+import type { Parent }         from 'unist';
+import type { Image, Code }    from 'mdast';
 
-const SAFE_LANGS = new Set<string>([
-  'abap', 'actionscript3', 'applescript', 'bash', 'c', 'clojure', 'cpp', 'csharp',
-  'css', 'diff', 'docker', 'elixir', 'erlang', 'go', 'groovy', 'haskell', 'java',
-  'javascript', 'js', 'json', 'kotlin', 'less', 'lua', 'makefile', 'markdown',
-  'matlab', 'objective-c', 'perl', 'php', 'powershell', 'python', 'r', 'ruby',
-  'rust', 'sass', 'scala', 'shell', 'sql', 'swift', 'typescript', 'yaml'
-]);
+import { execFileSync }        from 'child_process';
+import * as fs                 from 'fs';
+import * as path               from 'path';
+import { tmpdir, homedir }     from 'os';
+import { imageSize }           from 'image-size';
 
-const ATTR_WHITELIST: Record<string, string[]> = {
-  heading: ['level'],
-  orderedList: ['order'],
-  codeBlock: ['language'],
-  link: ['href'],
-  panel: ['panelType'],
-  mediaSingle: ['layout'],
-  media: ['type', 'url', 'alt', 'width'],
-  table: ['isNumberColumnEnabled', 'layout'],
-  tableHeader: ['colspan', 'rowspan'],
-  tableCell: ['colspan', 'rowspan'],
-  expand: ['title'],
-  bodiedExtension: ['extensionType', 'extensionKey', 'parameters'],
-  multiBodiedExtension: ['extensionType', 'extensionKey', 'parameters'],
-  extension: ['extensionType', 'extensionKey', 'parameters'],
-  taskItem: ['localId', 'state'],
-  decisionItem: ['localId'],
-  date: ['timestamp'],
-  mention: ['id', 'text', 'userType']
-};
+/* ═════════════════  CONSTANTS & HELPERS  ═════════════════ */
 
-const MARK_ATTR_WHITELIST = new Set(['href']);
-const MARK_TYPE_WHITELIST = new Set([
-  'strong', 'em', 'underline', 'strike', 'link', 'subsup', 'code', 'textColor'
-]);
-
-const stripHtml = (txt: string) => txt.replace(/<[^>]+>/g, '');
-
-/* ──────────────────────────────────────────────────────────────── */
-/* 2. Fast, cached diagram generator                               */
-/* ──────────────────────────────────────────────────────────────── */
-
-const WORK_DIR = path.join(tmpdir(), 'writerside-diagrams');
+const WORK_DIR   = path.join(tmpdir(), 'writerside-diagrams');
+const PNG_MAGIC  = Buffer.from([0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A]);
 fs.mkdirSync(WORK_DIR, { recursive: true });
 
 const PLANTUML_JAR = (() => {
-  const envJar = process.env.PLANTUML_JAR?.replace(/^~(?=$|[\\/])/, homedir());
-  const vendorJar = path.resolve(__dirname, '../vendor/plantuml.jar');
-  const homeJar = path.resolve(homedir(), 'bin', 'plantuml.jar');
-  const found = [envJar, vendorJar, homeJar].find(p => p && fs.existsSync(p));
-  if (!found) {
-    throw new Error(
-      'plantuml.jar not found in $PLANTUML_JAR, vendor/, or ~/bin'
-    );
-  }
-  return found;
+  const envJar  = process.env.PLANTUML_JAR?.replace(/^~(?=$|[\\/])/, homedir());
+  const vendor  = path.resolve(__dirname, '../vendor/plantuml.jar');
+  const homeJar = path.resolve(homedir(), 'bin/plantuml.jar');
+  const pick    = [envJar, vendor, homeJar].find(p => p && fs.existsSync(p));
+  if (!pick) throw new Error('plantuml.jar not found – set $PLANTUML_JAR or place jar in vendor/');
+  return pick;
 })();
 
-function defaultDiagramGenerator(
-  lang: 'plantuml' | 'mermaid',
-  code: string
-): string {
-  // 1 ️⃣  Derive a deterministic file name
-  const contentHash = hashString(code);
-  const outPath = path.join(WORK_DIR, `${contentHash}.png`);
+export const IMAGE_DIR = process.env.AUTHORD_IMAGE_DIR ||
+                         path.resolve(process.cwd(), 'writerside', 'images');
 
-  // 2 ️⃣  Short-circuit if we already have a valid PNG
-  if (fs.existsSync(outPath)) {
-    const fd = fs.openSync(outPath, 'r');
-    try {
-      const sigBuf = Buffer.alloc(8);
-      fs.readSync(fd, sigBuf, 0, 8, 0);
-      // compare to PNG signature:
-      if (sigBuf.equals(Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]))) {
-        return outPath;
-      }
-    } finally {
-      fs.closeSync(fd);
-    }
-    fs.unlinkSync(outPath);
+const VOID_RE = /<(hr|br|img|input|meta|link)(\s[^/>]*)?>/gi;          // XHTML tidy-up
+
+/* ────────── hashing & PNG cache ────────── */
+const hashString = (s: string): string => {
+  let h = 5381; for (let i = 0; i < s.length; i++) h = (h << 5) + h + s.charCodeAt(i);
+  return Math.abs(h).toString(16);
+};
+
+function diagramToPng(lang: 'plantuml' | 'mermaid', code: string): string {
+  const out = path.join(WORK_DIR, `${hashString(code)}.png`);
+
+  if (fs.existsSync(out)) {
+    const buf = fs.readFileSync(out);
+    if (buf.length >= 8 && buf.compare(PNG_MAGIC, 0, 8, 0, 8) === 0) return out;
+    fs.unlinkSync(out);                                              // stale → regenerate
   }
-  // 3 ️⃣  Generate the diagram in PNG **directly**
+
   if (lang === 'plantuml') {
-    // -tpng tells PlantUML to output PNG to stdout
-    const png = execFileSync(
-      'java',
-      ['-jar', PLANTUML_JAR, '-tpng', '-pipe'],
-      { input: code, encoding: null, stdio: ['pipe', 'pipe', 'inherit'] }
-    );
-    fs.writeFileSync(outPath, png);       // binary write
-  } else if (lang === 'mermaid') {
-    /*  mmdc can read from stdin (`--input -`) and will emit the format
-        implied by --output’s file-extension.                            */
-    execFileSync(
-      'mmdc',
-      ['--input', '-', '--output', outPath, '--quiet'],
-      { input: code, stdio: ['pipe', 'ignore', 'inherit'] }
-    );
+    const png = execFileSync('java', ['-jar', PLANTUML_JAR, '-tpng', '-pipe'],
+                             { input: code, stdio: ['pipe','pipe','inherit'] });
+    fs.writeFileSync(out, png);
   } else {
-    throw new Error(`Unsupported language: ${lang}`);
+    execFileSync('mmdc', ['--input','-','--output',out,'--quiet'],
+                 { input: code, stdio: ['pipe','ignore','inherit'] });
   }
-
-  return outPath;
+  return out;
 }
 
+/* ────────── copy / hard-link PNGs into IMAGE_DIR ────────── */
+const ensureDiagramInImageDir = (() => {
+  const handled = new Set<string>();
 
+  return (pngPath: string): string => {
+    if (handled.has(pngPath)) return path.basename(pngPath);
 
-// Simple string hashing function
-function hashString(str: string): string {
-  let hash = 5381;
-  for (let i = 0; i < str.length; i++) {
-    hash = (hash << 5) + hash + str.charCodeAt(i);
-  }
-  return Math.abs(hash).toString(16);
-}
+    const targetDir  = IMAGE_DIR;
+    const targetPath = path.join(targetDir, path.basename(pngPath));
 
-/* ──────────────────────────────────────────────────────────────── */
-/* 3. Transformer                                                 */
-/* ──────────────────────────────────────────────────────────────── */
-
-export class WritersideMarkdownTransformer extends MarkdownTransformer {
-  private readonly diagramGenerator: (lang: 'plantuml' | 'mermaid', code: string) => string;
-
-  constructor(
-    schema: Schema = defaultSchema,
-    diagramGenerator: (lang: 'plantuml' | 'mermaid', code: string) => string = defaultDiagramGenerator
-  ) {
-    super(schema);
-    this.diagramGenerator = diagramGenerator;
-  }
-
-  toADF(md: string): any {
-    const adf = finalSanitize(this._parseToJson(md));
-    adf.version = 1;
-    return adf;
-  }
-
-  private _parseToJson(md: string): any {
-    const roundTripped = unified()
-      .use(remarkParse)
-      .use(remarkPreserveComments)
-      .use(remarkDirective)
-      .use(remarkStringify as any)
-      .processSync(preprocess(md, this.diagramGenerator))
-      .toString();
-
-    const base = super.parse(roundTripped).toJSON() as any;
-    base.content = base.content.filter(
-      (n: any) => !(n.type === 'paragraph' && (!n.content || n.content.length === 0))
-    );
-    return walk(groupExpandContent(base), transformNode);
-  }
-}
-
-/* ──────────────────────────────────────────────────────────────── */
-/* 4. Final sanitiser                                             */
-/* ──────────────────────────────────────────────────────────────── */
-
-function sanitizeMarks(marks?: any[]): any[] | undefined {
-  if (!marks) return;
-  const clean: any[] = [];
-  for (const m of marks) {
-    if (!MARK_TYPE_WHITELIST.has(m.type)) continue;
-    if (m.type === 'link' && m.attrs) {
-      Object.keys(m.attrs).forEach(k => {
-        if (!MARK_ATTR_WHITELIST.has(k) || !m.attrs[k]) delete m.attrs[k];
-      });
-      if (!Object.keys(m.attrs).length) delete m.attrs;
+    if (!fs.existsSync(targetPath)) {
+      fs.mkdirSync(targetDir, { recursive: true });
+      try { fs.linkSync(pngPath, targetPath); }
+      catch { fs.copyFileSync(pngPath, targetPath); }
     }
-    clean.push(m);
-  }
-  return clean.length ? clean : undefined;
-}
-
-function finalSanitize(node: any): any {
-  if (Array.isArray(node)) {
-    const arr = node.map(finalSanitize).filter(Boolean);
-    return arr.length ? arr : null;
-  }
-  if (node && typeof node === 'object') {
-    if (node.type === 'text') {
-      const txt = stripHtml(node.text || '').trim();
-      return txt ? { ...node, text: txt } : null;
-    }
-    if (node.content) {
-      node.content = finalSanitize(node.content);
-      if (!node.content?.length) return null;
-    }
-    if (node.marks) node.marks = sanitizeMarks(node.marks);
-    if (node.attrs) {
-      const allowed = new Set(ATTR_WHITELIST[node.type] || []);
-      Object.keys(node.attrs).forEach(k => {
-        if (!allowed.has(k) || node.attrs[k] == null || node.attrs[k] === '') {
-          delete node.attrs[k];
-        }
-      });
-      if (!Object.keys(node.attrs).length) delete node.attrs;
-    }
-    if (node.type === 'codeBlock') {
-      const txtNode = node.content?.[0];
-      if (txtNode?.type === 'text') {
-        txtNode.text = txtNode.text.replace(/\r\n?/g, '\n');
-      }
-      if (node.attrs?.language && !SAFE_LANGS.has(node.attrs.language)) {
-        delete node.attrs.language;
-      }
-    }
-  }
-  return node;
-}
-
-/* ──────────────────────────────────────────────────────────────── */
-/* 5. Pre-parse cleanup & diagram handling                         */
-/* ──────────────────────────────────────────────────────────────── */
-
-function preprocess(
-  md: string,
-  diagramGenerator?: (lang: 'plantuml' | 'mermaid', code: string) => string
-): string {
-  if (diagramGenerator) {
-    md = md.replace(
-      /```(plantuml|mermaid)[^\n]*\n([\s\S]*?)```/gi,
-      (_, lang: 'plantuml' | 'mermaid', code: string) => {
-        try {
-          const pngPath = diagramGenerator(lang, code.trim());
-          const file = path.basename(pngPath);
-          return `\n\n@@ATTACH:${file}@@\n\n`;
-        } catch (e) {
-          console.error(`Diagram generation failed (${lang}):`, e);
-          return _;
-        }
-      }
-    );
-  }
-  return md
-    .replace(/<!\[CDATA\[(.*?)\]\]>/gs, (_, i) => `\n\n\`\`\`\n${i.trim()}\n\`\`\`\n\n`)
-    .replace(
-      /<procedure[^>]*id="([^"]*)"[^>]*title="([^"]*)"[^>]*>([\s\S]*?)<\/procedure>/gi,
-      (_, id, t, i) => `\n\n@@PROCEDURE_BODY:${id}:${t}@@\n\n${i.trim()}\n\n@@PROCEDURE_END@@\n\n`
-    )
-    .replace(
-      /<include[^>]*from="([^"]*)"[^>]*element-id="([^"]*)".*?>/gi,
-      (_, f, e) => `\n\n@@INCLUDE:${f}:${e}@@\n\n`
-    )
-    .replace(/<tabs[^>]*>([\s\S]*?)<\/tabs>/gi, (_, inner) => {
-      const tabs = inner.match(/<tab[^>]*title="([^"]+)"[^>]*>([\s\S]*?)<\/tab>/gi);
-      if (!tabs) return '\n\n@@TABS_EMPTY@@\n\n';
-      const out: string[] = ['@@TABS_START@@'];
-      tabs.forEach((tab: string) => {
-        const [, ttl, body] = /<tab[^>]*title="([^"]+)"[^>]*>([\s\S]*?)<\/tab>/i.exec(tab)!;
-        out.push(`@@TAB_TITLE:${ttl}@@`, body.trim(), '@@TAB_END@@');
-      });
-      out.push('@@TABS_END@@');
-      return `\n\n${out.join('\n\n')}\n\n`;
-    })
-    .replace(/<seealso>([\s\S]*?)<\/seealso>/gi, (_, inner) => {
-      const links = inner.match(/<a href="([^"]+)">([^<]+)<\/a>/gi) || [];
-      const encoded = links.map((l: string) => {
-        const [, href, text] = /<a href="([^"]+)">([^<]+)<\/a>/.exec(l)!;
-        return `${href}|${text}`;
-      }).join(';');
-      return `\n\n@@SEEALSO:${encoded}@@\n\n`;
-    })
-    .replace(
-      /<img\b([^>]*)\/?>/gi,
-      (_, rawAttrs: string) => {
-        // ① gather all attributes into a map  (src, alt, width, border-effect …)
-        const attrs = Object.fromEntries(
-          [...rawAttrs.matchAll(/([\w-]+)\s*=\s*"(.*?)"/g)]
-            .map(m => [m[1].toLowerCase(), m[2]])
-        );
-
-        const src = attrs.src;                        // required
-        const alt = attrs.alt ?? path.basename(src);  // fall back to file name
-
-        // ② turn *every* remaining attribute into a `k=v` pair
-        delete attrs.src;
-        delete attrs.alt;
-        const params = Object.entries(attrs)
-          .map(([k, v]) => `${k}=${v}`)
-          .join(';');
-
-        /* ③ emit a plain Markdown image that *our own* image-to-stub
-              regex (further down in preprocess) already understands:  
-              ![alt](file){width=290;border-effect=line}
-        */
-        const brace = params ? `{${params}}` : '';
-        return `\n\n![${alt}](${src})${brace}\n\n`;
-      },
-    )
-    .replace(/<code>([\s\S]*?)<\/code>/gi, (_, i) => '`' + i + '`')
-    .replace(/<shortcut[^>]*>([\s\S]*?)<\/shortcut>/gi, (_, i) => '`' + i + '`')
-    .replace(/<!--[\s\S]*?-->/g, '\n\n')
-    .replace(/^\s*\{[^}]+\}\s*$/gm, '')
-    .replace(/^(#{1,6} .+?)\n(?!\n)/gm, '$1\n\n')
-    .replace(
-      /<panel type="(\w+)">([\s\S]*?)<\/panel>/gi,
-      (_, t, c) => `\n\n@@PANEL:${t}:${c.trim()}@@\n\n`
-    )
-    .replace(/<taskList>([\s\S]*?)<\/taskList>/gi, (_, inner) => {
-      const items = inner.match(/<taskItem state="(\w+)">([\s\S]*?)<\/taskItem>/gi) || [];
-      const out = ['@@TASK_START@@', ...items.map((it: string) => {
-        const [, s, c] = /<taskItem state="(\w+)">([\s\S]*?)<\/taskItem>/i.exec(it)!;
-        return `@@TASK_ITEM:${s}:${c.trim()}@@`;
-      }), '@@TASK_END@@'];
-      return `\n\n${out.join('\n')}\n\n`;
-    })
-    .replace(/<decisionList>([\s\S]*?)<\/decisionList>/gi, (_, inner) => {
-      const items = inner.match(/<decisionItem>([\s\S]*?)<\/decisionItem>/gi) || [];
-      const out = ['@@DECISION_START@@', ...items.map((it: string) => {
-        return `@@DECISION_ITEM:${/<decisionItem>([\s\S]*?)<\/decisionItem>/i.exec(it)![1].trim()}@@`;
-      }), '@@DECISION_END@@'];
-      return `\n\n${out.join('\n')}\n\n`;
-    })
-    .replace(/<date timestamp="(\d+)"\s*\/>/gi, (_, ts) => `\n\n@@DATE:${ts}@@\n\n`)
-    .replace(
-      /!\[([^\]]+)\]\(([^)]+)\)((?:\s*\{[^}]+\})+)/g,
-      (_, _alt, url, braces) => {
-        // collect the inner bits "width=290" and "border-effect=line"
-        const params = [...braces.matchAll(/\{([^}]+)\}/g)]
-          .map(m => m[1].trim())
-          .join(';');
-        const file = path.basename(url);
-        return `\n\n@@ATTACH:${file}|${params}@@\n\n`;
-      });
-}
-
-/* ──────────────────────────────────────────────────────────────── */
-/* 6. Preserve HTML comments as code blocks                       */
-/* ──────────────────────────────────────────────────────────────── */
-
-function remarkPreserveComments() {
-  return (tree: any) => {
-    visit(tree, 'html', (node: any, i?: number, p?: any) => {
-      if (!p || !node.value.startsWith('<!--')) return;
-      p.children.splice(i!, 1, {
-        type: 'code',
-        lang: 'comment',
-        value: node.value.replace(/^<!--|-->$/g, '').trim()
-      });
-    });
+    handled.add(pngPath);
+    return path.basename(pngPath);
   };
-}
+})();
 
-/* ──────────────────────────────────────────────────────────────── */
-/* 7. Structural transforms                                       */
-/* ──────────────────────────────────────────────────────────────── */
+/* ═══════════════  PRE-PROCESSOR  ═══════════════ */
 
-function walk(n: any, fn: (x: any, p?: any) => any, p?: any): any {
-  const mapped = fn({ ...n }, p);
-  if (mapped?.content) {
-    mapped.content = mapped.content
-      .map((c: any) => walk(c, fn, mapped))
-      .filter(Boolean);
-  }
-  return mapped;
-}
+const makeStub = (file: string, params = '') =>
+  `@@ATTACH|file=${path.basename(file)}${params ? `|${params}` : ''}@@`;
 
-function groupExpandContent(doc: any): any {
-  for (let i = 0; i < doc.content.length - 1; i++) {
-    const node = doc.content[i], next = doc.content[i + 1];
-    if (node.type === 'expand' && next.type === 'paragraph') {
-      node.content = next.content;
-      doc.content.splice(i + 1, 1);
+export function preprocess(
+  md: string,
+  diagGen = diagramToPng,
+): string {
+  const tree = unified().use(remarkParse).use(remarkDirective).parse(md);
+
+  visit(tree, (node, idx, parent: Parent | undefined) => {
+    /* ─── Diagrams ─────────────────────────────────────────── */
+    if (node.type === 'code' &&
+        (node.lang === 'plantuml' || node.lang === 'mermaid')) {
+      const png   = diagGen(node.lang as any, (node as Code).value.trim());
+      const file  = ensureDiagramInImageDir(png);
+      (parent!.children as any)[idx!] = { type: 'html', value: makeStub(file) };
     }
-  }
-  return doc;
-}
 
-function transformNode(node: any, parent?: any): any {
-  const isParagraph = (n: any, txt?: string) =>
-    n.type === 'paragraph' &&
-    Array.isArray(n.content) &&
-    n.content[0]?.type === 'text' &&
-    typeof n.content[0].text === 'string' &&
-    (txt ? n.content[0].text === txt : true);
+    /* ─── Markdown images ──────────────────────────────────── */
+    if (node.type === 'image') {
+      const img    = node as Image;
+      const base   = path.basename(img.url.split(/[?#]/)[0]);
+      let params   = '';
 
-  const extension = (
-    type: 'extension' | 'bodiedExtension' | 'multiBodiedExtension',
-    key: string,
-    parameters: Record<string, any> = {},
-    content: any[] = []
-  ) => ({
-    type,
-    attrs: { extensionType: 'com.writerside', extensionKey: key, parameters },
-    ...(content.length ? { content } : {})
+      /* pick up `{ width=123;height=45 }` immediately after the image */
+      if (parent && idx! + 1 < parent.children.length) {
+        const next = parent.children[idx! + 1];
+        if (next.type === 'text' && /^\{\s*[^}]+\s*\}/.test((next as any).value)) {
+          params = (next as any).value.replace(/^\{\s*|\s*\}$/g, '');
+          parent.children.splice(idx! + 1, 1);
+        }
+      }
+      (parent!.children as any)[idx!] = { type: 'html', value: makeStub(base, params) };
+    }
+
+    /* ─── <img …> inside raw HTML ──────────────────────────── */
+    if (node.type === 'html') {
+      node.value = node.value.replace(
+        /<img\s+[^>]*src=["']([^"']+)["'][^>]*>/gi,
+        (_m: string, src: string): string => {
+          const base   = path.basename(src.split(/[?#]/)[0]);
+          const widthM = _m.match(/\bwidth=["'](\d+)(?:px)?["']/i);
+          const params = widthM ? `width=${widthM[1]}` : '';
+          return makeStub(base, params);
+        });
+    }
   });
 
-  // PROCEDURE BODY
-  if (isParagraph(node) && node.content[0].text.startsWith('@@PROCEDURE_BODY:')) {
-    const [, id, title] = node.content[0].text.split(':');
-    const body: any[] = [];
-    let idx = parent!.content.indexOf(node) + 1;
-    while (!isParagraph(parent!.content[idx], '@@PROCEDURE_END@@')) {
-      body.push(parent!.content.splice(idx, 1)[0]);
-    }
-    parent!.content.splice(idx, 1);
-    return extension('bodiedExtension', 'procedure', { id, title }, body);
-  }
-
-  // TABS
-  // if (isParagraph(node, '@@TABS_START@@')) {
-  //   const idxStart = parent!.content.indexOf(node);
-  //   const titles: string[] = [];
-  //   const tabBodies: any[] = [];
-  //   let idx = idxStart + 1;
-  //   while (!isParagraph(parent!.content[idx], '@@TABS_END@@')) {
-  //     const titlePar = parent!.content[idx];
-  //     const raw = titlePar?.content?.[0]?.text;
-  //     if (typeof raw === 'string') {
-  //       const match = raw.match(/^@@TAB_TITLE:(.+)@@$/);
-  //       if (match) {
-  //         titles.push(match[1]);
-  //         parent!.content.splice(idx, 1);
-  //         const body: any[] = [];
-  //         while (!isParagraph(parent!.content[idx], '@@TAB_END@@')) {
-  //           body.push(parent!.content.splice(idx, 1)[0]);
-  //         }
-  //         parent!.content.splice(idx, 1);
-  //         tabBodies.push({ type: 'extensionBody', content: body });
-  //         continue;
-  //       }
-  //     }
-  //     idx++;
-  //   }
-  //   parent!.content.splice(idx, 1);
-  //   parent!.content.splice(idxStart, 1);
-  //   return extension('multiBodiedExtension', 'tabs', { titles }, tabBodies);
-  // }
-
-  // INLINE PLACEHOLDERS
-  if (isParagraph(node)) {
-    const text = node.content[0].text;
-    if (text.startsWith('@@INCLUDE:')) {
-      const [, from, elementId] = text.split(':');
-      return extension('extension', 'include', { from, 'element-id': elementId });
-    }
-    if (text === '@@TABS_EMPTY@@') {
-      return extension('multiBodiedExtension', 'tabs');
-    }
-    if (text.startsWith('@@SEEALSO:')) {
-      const links = text
-        .slice('@@SEEALSO:'.length)
-        .split(';')
-        .map((p: { split: (arg0: string) => [any, any]; }) => {
-          const [href, label] = p.split('|');
-          return { href, label };
-        });
-      return extension('extension', 'seealso', { links });
-    }
-    if (text.startsWith('@@PANEL:')) {
-      const [, panelType, content] = text.split(':');
-      return {
-        type: 'panel',
-        attrs: { panelType: panelType.toLowerCase() },
-        content: [{ type: 'paragraph', content: [{ type: 'text', text: content }] }],
-      };
-    }
-    if (text.startsWith('@@DATE:')) {
-      return { type: 'date', attrs: { timestamp: parseInt(text.slice('@@DATE:'.length), 10) } };
-    }
-  }
-
-  // TASKS
-  if (isParagraph(node, '@@TASK_START@@')) {
-    const idxStart = parent!.content.indexOf(node);
-    const items: any[] = [];
-    let idx = idxStart + 1;
-    while (!isParagraph(parent!.content[idx], '@@TASK_END@@')) {
-      const item = parent!.content[idx];
-      const raw = item?.content?.[0]?.text;
-      if (typeof raw === 'string' && raw.startsWith('@@TASK_ITEM:')) {
-        const [, state, content] = raw.split(':');
-        items.push({
-          type: 'taskItem',
-          attrs: { localId: `task-${items.length + 1}`, state: state === 'DONE' ? 'DONE' : 'TODO' },
-          content: [{ type: 'text', text: content }],
-        });
-        parent!.content.splice(idx, 1);
-        continue;
-      }
-      idx++;
-    }
-    parent!.content.splice(idx, 1);
-    parent!.content.splice(idxStart, 1);
-    return { type: 'taskList', content: items };
-  }
-
-  // DECISIONS
-  if (isParagraph(node, '@@DECISION_START@@')) {
-    const idxStart = parent!.content.indexOf(node);
-    const items: any[] = [];
-    let idx = idxStart + 1;
-    while (!isParagraph(parent!.content[idx], '@@DECISION_END@@')) {
-      const item = parent!.content[idx];
-      const raw = item?.content?.[0]?.text;
-      if (typeof raw === 'string' && raw.startsWith('@@DECISION_ITEM:')) {
-        const text = raw.replace('@@DECISION_ITEM:', '');
-        items.push({
-          type: 'decisionItem',
-          attrs: { localId: `dec-${items.length + 1}` },
-          content: [{ type: 'paragraph', content: [{ type: 'text', text }] }],
-        });
-        parent!.content.splice(idx, 1);
-        continue;
-      }
-      idx++;
-    }
-    parent!.content.splice(idx, 1);
-    parent!.content.splice(idxStart, 1);
-    return { type: 'decisionList', content: items };
-  }
-
-  // COLLAPSIBLE HEADINGS
-  if (node.type === 'heading') {
-    const first = node.content?.[0];
-    if (first?.type === 'text' && typeof first.text === 'string') {
-      const m = first.text.match(/^(.*)\s+\{collapsible="true"\}$/);
-      if (m) {
-        return { type: 'expand', attrs: { title: m[1] }, content: [] };
-      }
-    }
-  }
-
-  // CLEANUP empty/macro-only paragraphs
-  if (
-    node.type === 'paragraph' &&
-    (
-      !node.content?.length ||
-      (node.content.every((c: any) => c.type === 'text') &&
-        /^\{[^}]+\}$/.test(node.content.map((c: any) => c.text).join('').trim()))
-    )
-  ) {
-    return null;
-  }
-
-  // convert @@ATTACH into a stub paragraph
-  if (
-  node.type === 'paragraph' &&
-  typeof node.content?.[0]?.text === 'string' &&
-  node.content[0].text.startsWith('@@ATTACH:')
-) {
-  /* NEW 👉 */ const stub = node.content[0].text                         // keep whole stub
-  /* OLD    - const file = node.content[0].text.replace('@@ATTACH:', ''); */
-
-  return {
-    type: 'paragraph',
-    /* NEW 👉 */ content: [{ type: 'text', text: `ATTACH-STUB:${stub.slice('@@ATTACH:'.length)}` }],
-    /*        |                                  └── still ends with “@@” so
-               |                                      injectMediaNodes()’s
-               |                                      .slice(12, -2) logic
-               |                                      continues to work      */
-  };
+  return unified().use(remarkStringify).stringify(tree);
 }
 
+/* ═══════════  MARKDOWN → HTML → XHTML  ═══════════ */
 
-  return node;
+const markdownToHtml = (md: string) =>
+  String(
+    unified()
+      .use(remarkParse)
+      .use(remarkGfm)
+      .use(remarkDirective)
+      .use(remarkRehype,   { allowDangerousHtml: true })
+      .use(rehypeRaw)
+      .use(rehypeStringify,{ allowDangerousHtml: true })
+      .processSync(md),
+  );
+
+function replacePlaceholders(html: string): string {
+  /* unwrap links around our stubs */
+  html = html.replace(/<a[^>]*>(@@ATTACH\|file=[^@]+@@)<\/a>/gi, '$1');
+
+  /* @@ATTACH|file=… → <ac:image …> */
+  html = html.replace(
+    /@@ATTACH\|file=([^|@]+)(?:\|([^@]+))?@@/gi,
+    (_all, file, raw = '') => {
+      const paramMap = Object.fromEntries(
+        raw.split(';')
+           .filter(Boolean)
+           .map((p: string) => p.split('=').map((s: string) => s.trim()))
+      ) as Record<string, string>;
+
+      /* normalise widths/heights like “450px” → “450” */
+      if (paramMap.width  ) paramMap.width  = paramMap.width.replace(/px$/i, '');
+      if (paramMap.height ) paramMap.height = paramMap.height.replace(/px$/i, '');
+
+      const attrs: string[] = [];
+      if (paramMap.width )  attrs.push(`ac:width="${paramMap.width}"`);
+      if (paramMap.height)  attrs.push(`ac:height="${paramMap.height}"`);
+      if (attrs.length)     attrs.push('ac:thumbnail="true"');   // Server/DC needs this
+
+      /* add native dimensions when available */
+      try {
+        const { width: w = 0, height: h = 0 } =
+          imageSize(fs.readFileSync(path.join(IMAGE_DIR, file)));
+        if (w) attrs.push(`ac:original-width="${w}"`);
+        if (h) attrs.push(`ac:original-height="${h}"`);
+      } catch {/* ignore if file is not local yet */ }
+
+      const attrStr = attrs.length ? ' ' + attrs.join(' ') : '';
+      return `<ac:image${attrStr}>\n  <ri:attachment ri:filename="${file}"/>\n</ac:image>`;
+    });
+
+  /* markdown ~~strike~~ → Confluence-friendly inline style */
+  html = html.replace(/<del>(.*?)<\/del>/gi,
+                      '<span style="text-decoration:line-through;">$1</span>');
+
+  return html;
 }
 
 
 
-export { preprocess, defaultDiagramGenerator };
+/* self-close void tags + wrap in Confluence namespace */
+const wrapXhtml = (inner: string): string =>
+  `<div xmlns:ac="http://atlassian.com/content" xmlns:ri="http://atlassian.com/resource/identifier">` +
+    inner
+      .replace(VOID_RE, (_, tag: string, rest = '') =>
+        `<${tag}${(rest || '').trimEnd()}/>`)             // convert <hr> → <hr/>
+      .replace(/&(?!(?:[a-z]+|#\d+);)/g, '&amp;') +      // escape naked &
+  `</div>`;
+
+/* ═══════════  TRANSFORMER CLASS  ═══════════ */
+
+export class WritersideMarkdownTransformerDC extends MarkdownTransformer {
+  constructor(schema: Schema = defaultSchema) { super(schema); }
+
+  /** Confluence storage (XHTML) */
+  toStorage(md: string) {
+    const pre  = preprocess(md, diagramToPng);
+    const html = markdownToHtml(pre);
+    return {
+      value: wrapXhtml(replacePlaceholders(html)),
+      representation: 'storage' as const,
+    };
+  }
+
+  /** Round-trip ADF (unchanged vs. Atlaskit) */
+  toADF(md: string) {
+    const pre   = preprocess(md, diagramToPng);
+    const round = unified().use(remarkParse).processSync(pre).toString();
+    return super.parse(round).toJSON();
+  }
+}
+export default new WritersideMarkdownTransformerDC();

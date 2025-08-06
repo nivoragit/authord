@@ -1,6 +1,6 @@
 // src/utils/remarkRenderer.ts
 import { markdownToAdf } from 'marklassian';
-import { WritersideMarkdownTransformer } from './writerside-markdown-transformer';
+import { WritersideMarkdownTransformerDC } from './writerside-markdown-transformer';
 // import { defaultSchema } from '@atlaskit/adf-schema/dist/types/schema/default-schema';
 
 /**
@@ -14,7 +14,7 @@ export async function renderContent(markdown: string): Promise<string> {
   // console.log(escapedJson)
   // return wrapWithSyncScript(jsonString);
 
-  const transformer = new WritersideMarkdownTransformer();
+  const transformer = new WritersideMarkdownTransformerDC();
   // // const transformer = new MarkdownTransformer(defaultSchema);
   // const adfDocument = transformer.parse(markdown).toJSON();
   // adfDocument.version = 1;

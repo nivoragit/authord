@@ -18,7 +18,7 @@ import path from 'path';
 import mime from 'mime-types';
 import { renderContent } from './remarkRenderer';
 export { render_all } from './render-all-markdown';
-export { WritersideMarkdownTransformer }  from './writerside-markdown-transformer';
+export { WritersideMarkdownTransformerDC }  from './writerside-markdown-transformer';
 
 export interface RenderOptions {
   /** embed images/fonts as data: URIs */
