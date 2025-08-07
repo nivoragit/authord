@@ -2,13 +2,17 @@
 /**********************************************************************
  * publish-single.ts  –  Flatten an Authord / Writerside project into
  * one Confluence page (Data Center / Server).  Delta-aware.
+ * 
+ * NEW:
+ *   • Accept --page-id (-i). If present we update that page directly,
+ *     otherwise we resolve by title as before.
  *********************************************************************/
 
-import fs from 'fs/promises';
-import path from 'path';
-import { createHash } from 'crypto';
-import minimist from 'minimist';
-import axios from 'axios';
+import fs                from 'fs/promises';
+import path              from 'path';
+import { createHash }    from 'crypto';
+import minimist          from 'minimist';
+import axios             from 'axios';
 
 import {
   findPageWithVersion,
@@ -16,9 +20,9 @@ import {
   uploadImages,
   getRemoteProperty,
   setRemoteHash,
-} from './utils/confluence-utils';
+}                         from './utils/confluence-utils';
 import { WritersideMarkdownTransformerDC } from '@authord/renderer';
-import type { ConfluenceCfg } from './utils/types';
+import type { ConfluenceCfg }              from './utils/types';
 
 /* ───────── helpers ───────── */
 const sha256 = (b: Buffer) => createHash('sha256').update(b).digest('hex');
@@ -41,10 +45,24 @@ const auth = (cfg: ConfluenceCfg) => ({
   headers: { Authorization: `Bearer ${cfg.apiToken}` },
 });
 
+/* ───── fetch page (id → version) ───── */
+async function getPageWithVersion(cfg: ConfluenceCfg, pageId: string) {
+  const url = `${cfg.baseUrl}/rest/api/content/${pageId}?expand=version`;
+  const { data } = await axios.get(url, auth(cfg));
+  return {
+    id:            data.id as string,
+    // next version number Confluence expects
+    nextVersion:   (data.version?.number ?? 0) + 1,
+    title:         data.title as string,
+    spaceKey:      data.space?.key as string,
+  };
+}
+
 /* ───────── MAIN ───────── */
 async function main() {
   const argv = minimist(process.argv.slice(2), {
-    string: ['md', 'images', 'space', 'title', 'base-url', 'token'],
+    string: ['md', 'images', 'space', 'title', 'base-url', 'token', 'page-id'],
+    alias:  { 'page-id': 'i' },
   });
 
   const cwd       = process.cwd();
@@ -54,9 +72,14 @@ async function main() {
   const pageTitle = argv.title     ?? 'Exported Documentation';
   const baseUrl   = argv['base-url'] ?? process.env.CONF_BASE_URL;
   const apiToken  = argv.token      ?? process.env.CONF_TOKEN;
+  const pageIdArg = argv['page-id'];          // ← NEW
 
-  for (const [k, v] of Object.entries({ mdDir, imgDir, spaceKey, baseUrl, apiToken }))
+  for (const [k, v] of Object.entries({ mdDir, imgDir, baseUrl, apiToken }))
     if (!v) { console.error(`Missing required option: ${k}`); process.exit(1); }
+  // space is only required when we *create* a page
+  if (!spaceKey && !pageIdArg) {
+    console.error('Missing required option: space (only needed when page-id is absent)'); process.exit(1);
+  }
 
   /* 0️⃣  Confluence credentials */
   const cfg: ConfluenceCfg = { baseUrl, apiToken };
@@ -68,7 +91,10 @@ async function main() {
   const hash = sha256(Buffer.from(storageHtml));
 
   /* 2️⃣  Delta-check */
-  const hit = await findPageWithVersion(cfg, spaceKey, pageTitle);
+  const hit = pageIdArg
+    ? await getPageWithVersion(cfg, pageIdArg)
+    : await findPageWithVersion(cfg, spaceKey!, pageTitle);
+
   if (hit && (await getRemoteProperty(cfg, hit.id))?.value === hash) {
     const need = extractFilenames(storageHtml);
     const have = await listAttachments(cfg, hit.id);

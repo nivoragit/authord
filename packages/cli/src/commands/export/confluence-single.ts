@@ -1,10 +1,10 @@
-import { Command } from 'commander';
-import path from 'path';
-import fs from 'fs';
-import { spawn } from 'child_process';
+import { Command }   from 'commander';
+import path          from 'path';
+import fs            from 'fs';
+import { spawn }     from 'child_process';
 
-import { validateAuthordProject } from '../../utils/validate-project';
-import { validateWritersideProject } from '../../utils/validate-writerside';
+import { validateAuthordProject }     from '../../utils/validate-project';
+import { validateWritersideProject }  from '../../utils/validate-writerside';
 
 const PROJECT_CONFIG_FILES = ['authord.config.json', 'writerside.cfg'];
 
@@ -12,7 +12,8 @@ export default new Command('confluence-single')
   .description('Flatten the whole project into one Confluence page')
   .requiredOption('--base-url <url>', 'Confluence base URL')
   .requiredOption('--token <t>',      'API token (PAT/password)')
-  .requiredOption('--space <KEY>',    'Space key')
+  .requiredOption('--space <KEY>',    'Space key (ignored if --page-id is given)')
+  .option('--page-id, -i <ID>',       'Existing Confluence page-id to update')
   .option('--title <t>',              'Page title', 'Exported Documentation')
   .option('--md <dir>',               'Topics directory',  'topics')
   .option('--images <dir>',           'Images directory',  'images')
@@ -34,13 +35,14 @@ export default new Command('confluence-single')
     const publishScript = path.resolve(__dirname, '../../publish-single.js');
     const args = [
       'ts-node', publishScript,
-      '--md',     opts.md,
-      '--images', opts.images,
-      '--space',  opts.space,
-      '--title',  opts.title,
-      '--base-url', opts.baseUrl,
-      '--token',    opts.token,
+      '--md',        opts.md,
+      '--images',    opts.images,
+      '--base-url',  opts.baseUrl,
+      '--token',     opts.token,
     ];
+
+    if (opts.pageId) { args.push('--page-id', opts.pageId); }
+    else {            args.push('--space', opts.space, '--title', opts.title); }
 
     console.log(`\n> npx ${args.join(' ')}\n`);
     const child = spawn('npx', args, { stdio: 'inherit' });
