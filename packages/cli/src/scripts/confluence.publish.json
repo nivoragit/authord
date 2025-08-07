@@ -1,9 +1,0 @@
-{
-  "baseUrl"      : "https://confluence.sumihiran.dev",
-  "username"     : "madushika",
-  "apiToken"     : "MTIxNjk5NDYxNzAxOm/69wd+rGe2znJggSxGjUWj6Vpg",
-  "spaceKey"     : "TEST",
-  "parentPageId" : "360496",
-  "topicsDir"    : "topics",
-  "imagesDir"    : "images"
-}

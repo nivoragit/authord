@@ -10,36 +10,14 @@ import path from 'path';
 import FormData from 'form-data';
 import sizeOf from 'image-size';
 import { v4 as uuidv4 } from 'uuid';
-
-/* ════════════════ Config & helpers ════════════════ */
-export interface ConfluenceCfg {
-  baseUrl : string;  // https://confluence.mycorp.com
-  username: string;  // Confluence DC username
-  apiToken: string;  // Personal-Access-Token  (or password if you switch to basic auth)
-}
+import { AttachmentResponse, ConfluenceAttachment, ConfluenceCfg, PageHit, PropertyData, UploadResult } from './types';
 
 export const authHeaders = (cfg: ConfluenceCfg) => ({
   headers: { Authorization: `Bearer ${cfg.apiToken}` },
 });
 
 /* ═══════════════ Types ═══════════════ */
-export interface UploadResult { file: string; mediaId: string; }
 
-interface AttachmentVersion   { number: number; }
-interface ConfluenceAttachment {
-  id: string;
-  title: string;
-  version: AttachmentVersion;
-  _links?: { download?: string };
-}
-interface AttachmentResponse {
-  results: ConfluenceAttachment[];
-  size: number;
-  _links?: { next?: string };
-}
-
-interface PageHit      { id: string; nextVersion: number; }
-interface PropertyData { key: string; value: string; version: { number: number } }
 
 /* ═════════════ Content CRUD & versioning ═════════════ */
 export async function findPageWithVersion(

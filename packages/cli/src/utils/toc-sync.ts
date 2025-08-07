@@ -1,19 +1,7 @@
 // File: src/utils/toc-sync.ts
 import { promises as fs } from 'fs';
 import { XMLParser } from 'fast-xml-parser';
-
-export interface TreeNode {
-  file: string;             // markdown filename, e.g. "chapter1.md"
-  index: number;            // 0-based sibling position
-  parent: TreeNode | null;  // null for root pages
-  children: TreeNode[];
-}
-
-export interface TocConfig {
-  rootTitle: string;   // the instance-profile @name
-  startPage: string;   // the instance-profile @start-page
-  nodes:    TreeNode[];// the toc-element tree
-}
+import { TocConfig, TreeNode } from './types';
 
 /**
  * Read an .tree file and extract:

@@ -44,7 +44,7 @@ const PLANTUML_JAR = (() => {
 })();
 
 export const IMAGE_DIR = process.env.AUTHORD_IMAGE_DIR ||
-                         path.resolve(process.cwd(), 'writerside', 'images');
+                         path.resolve(process.cwd(),'images');
 
 const VOID_RE = /<(hr|br|img|input|meta|link)(\s[^/>]*)?>/gi;          // XHTML tidy-up
 

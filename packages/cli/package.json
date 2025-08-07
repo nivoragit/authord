@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@authord/core": "^0.1.0",
-    "@authord/renderer-html": "0.1.0",
+    "@authord/renderer": "0.1.0",
     "axios": "^1.10.0",
     "commander": "^12.0.0",
     "confluence.js": "^2.0.0",

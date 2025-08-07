@@ -1,67 +1,82 @@
+import fs from 'fs';
 import path from 'path';
-import fs   from 'fs';
-import {
-  AuthordConfig,
-  InstanceProfile,
-  TocElement
-} from '@authord/core';
-import {
-  validateMarkdown,
-  ValidationResult,
-} from './markdown-validator';
+import { validateMarkdown } from './markdown-validator';
 import { readConfig } from './readConfig';
+import { AuthordConfig, InstanceProfile, TocElement, ValidationResult } from './types';
 
-/** Validates project; on error prints details and exits with code 1. */
-export async function validateProject(root: string = process.cwd()): Promise<void> {
+/** Validates an Authord project; exits with code 1 on any error. */
+export async function validateAuthordProject(root: string = process.cwd()): Promise<void> {
   const cfg: AuthordConfig = await readConfig(root);
+  const errs: { path: string; reason: string }[] = [];
 
-  /* -------- 1. Non-markdown path checks ---------------- */
-  const pathErrors: { path: string; reason: string }[] = [];
-  checkDir(cfg.topics?.dir,  'Topics', pathErrors, root);
-  checkDir(cfg.images?.dir,  'Images', pathErrors, root);
+  /* ── 1. Directory sanity checks ─────────────────────────────── */
+  checkDir(cfg.topics?.dir,  'Topics', errs, root);
+  checkDir(cfg.images?.dir,  'Images', errs, root);
 
+  /* ── 2. Instance & TOC path checks ──────────────────────────── */
   if (cfg.instances) {
     for (const inst of cfg.instances) {
       if (inst['start-page']) {
-        validateTopicFile(inst, inst['start-page'], 'Start page', pathErrors, cfg.topics?.dir);
+        validateTopicFile(inst, inst['start-page'], 'Start page', errs, cfg.topics?.dir);
       }
       inst['toc-elements'].forEach(t =>
-        validateTocElement(inst, t, pathErrors, cfg.topics?.dir),
+        validateTocElement(inst, t, errs, cfg.topics?.dir)
       );
     }
   }
-  if (pathErrors.length) {
-    printPathErrors(pathErrors);
+
+  /* ── 3. Abort early if any non-markdown path errors ─────────── */
+  if (errs.length) {
+    printPathErrors(errs);
     console.error('❌ Project contains invalid paths');
     process.exit(1);
   }
 
-  /* -------- 2. Markdown-lint pass ---------------------- */
+  /* ── 4. Markdown-lint every topic file ──────────────────────── */
+  const topicsAbs  = cfg.topics?.dir  ? path.resolve(cfg.root ?? root, cfg.topics.dir)  : '';
+  const imagesAbs  = cfg.images?.dir  ? path.resolve(cfg.root ?? root, cfg.images.dir)  : undefined;
+  const mdFiles: string[] = [];
+
+  if (topicsAbs && fs.existsSync(topicsAbs)) {
+    (function walk(dir: string) {
+      for (const entry of fs.readdirSync(dir)) {
+        const abs = path.join(dir, entry);
+        const stat = fs.statSync(abs);
+        if (stat.isDirectory()) walk(abs);
+        else if (entry.endsWith('.md')) mdFiles.push(abs);
+      }
+    })(topicsAbs);
+  }
+
   const mdErrors: ValidationResult[] = [];
-  for (const doc of cfg.documents ?? []) {
-    const filePath = path.resolve(cfg.root ?? root, doc.path);
-    const res      = await validateMarkdown(filePath);
+  for (const file of mdFiles) {
+    const res = await validateMarkdown(file, imagesAbs);      // ← passes shared images dir
     if (res.errors.length) mdErrors.push(res);
   }
+
   if (mdErrors.length) {
     printMarkdownErrors(mdErrors);
     console.error('❌ Markdown validation failed');
     process.exit(1);
   }
+
+  console.log('✅ Project validation passed');
 }
 
-/* ───────── internal helpers ───────── */
+/* ───────────────────────── helpers ───────────────────────── */
 
 function checkDir(
-  dir: string | undefined,
+  rel: string | undefined,
   label: string,
   errs: { path: string; reason: string }[],
   root: string,
 ) {
-  if (!dir) return;
-  const abs = path.resolve(root, dir);
-  if (!fs.existsSync(abs)) errs.push({ path: dir, reason: `${label} directory not found` });
-  else if (!fs.statSync(abs).isDirectory()) errs.push({ path: dir, reason: `${label} path is not a directory` });
+  if (!rel) return;
+  const abs = path.resolve(root, rel);
+  if (!fs.existsSync(abs))
+    errs.push({ path: rel, reason: `${label} directory not found` });
+  else if (!fs.statSync(abs).isDirectory())
+    errs.push({ path: rel, reason: `${label} path is not a directory` });
 }
 
 function validateTocElement(

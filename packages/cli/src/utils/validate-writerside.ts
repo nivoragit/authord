@@ -1,83 +1,67 @@
 import fs from 'fs';
 import path from 'path';
 import { XMLParser } from 'fast-xml-parser';
-import { validateMarkdown, ValidationResult } from './markdown-validator';
+import { validateMarkdown } from './markdown-validator';
+import { ValidationResult } from './types';
 
 type Err = { path: string; reason: string };
 
-const parser = new XMLParser({
-  ignoreAttributes   : false,
-  attributeNamePrefix: '@_',
-});
+const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' });
 
-/** Validate a Writerside project (.cfg) and exit(1) with a clear report on error. */
 export async function validateWritersideProject(
   root: string = process.cwd(),
 ): Promise<void> {
   const errs: Err[] = [];
 
-  /* -------------------------------------------------- 1. Locate .cfg file */
-  const cfgPath = findCfgFile(root);
+  /* 1️⃣  find project .cfg */
+  const cfgPath = fs.readdirSync(root).find(f => f.endsWith('.cfg'));
   if (!cfgPath) {
-    errs.push({ path: 'Project root', reason: 'No *.cfg Writerside config found' });
-    exitIfErr();
+    finish([{ path: 'Project root', reason: 'No *.cfg Writerside config found' }]);
+    return;
   }
 
-  /* -------------------------------------------------- 2. Parse config — only <cfg> allowed */
-  const raw = safeParseXml(cfgPath!, errs);
-  const cfg = raw.ihp;
-  if (!cfg) {
-    errs.push({ path: cfgPath!, reason: 'Missing <cfg> root element' });
-    exitIfErr();
-  }
+  /* 2️⃣  parse .cfg */
+  const cfgXml = safeParseXml(path.join(root, cfgPath), errs);
+  const cfg = cfgXml.ihp;
+  if (!cfg) finish([{ path: cfgPath, reason: 'Missing <cfg> root element' }]);
 
-  const topicsDirRel = cfg.topics?.['@_dir'];
-  const imagesDirRel = cfg.images?.['@_dir'];
-  const instancesRaw = cfg.instance
-    ? (Array.isArray(cfg.instance) ? cfg.instance : [cfg.instance])
-    : [];
+  const topicsDirRel  = cfg.topics?.['@_dir']  as string | undefined;
+  const imagesDirRel  = cfg.images?.['@_dir']  as string | undefined;
+  const topicsAbs     = topicsDirRel ? path.resolve(root, topicsDirRel) : '';
+  const imagesAbs     = imagesDirRel ? path.resolve(root, imagesDirRel) : undefined;
 
-  /* -------------------------------------------------- 3. Directory checks */
+  /* 3️⃣  basic directory existence */
   checkDir(topicsDirRel, 'Topics directory', errs, root);
   checkDir(imagesDirRel, 'Images directory', errs, root);
 
-  /* -------------------------------------------------- 4. Validate each .tree file */
-  const treeFiles = instancesRaw
-    .map((i: any) => i['@_src'])
-    .filter(Boolean) as string[];
+  /* 4️⃣  validate *.tree files */
+  const instanceArr = cfg.instance ? (Array.isArray(cfg.instance) ? cfg.instance : [cfg.instance]) : [];
+  const treeFiles   = instanceArr.map((i: any) => i['@_src']).filter(Boolean) as string[];
 
-  for (const src of treeFiles) {
+  treeFiles.forEach(src => {
     const abs = path.resolve(root, src);
-    if (!fs.existsSync(abs)) {
-      errs.push({ path: src, reason: 'Tree file not found' });
-    } else {
-      validateTree(abs, path.resolve(root, topicsDirRel ?? ''), errs);
+    if (!fs.existsSync(abs)) errs.push({ path: src, reason: 'Tree file not found' });
+    else validateTree(abs, topicsAbs, errs);
+  });
+
+  /* 5️⃣  markdown-lint every topic file (uses shared images dir) */
+  await lintAllTopics(topicsAbs, imagesAbs, errs);
+
+  finish(errs);
+
+  /* ───────── helpers ───────── */
+  function finish(errors: Err[]): never | void {
+    if (!errors.length) {
+      console.log('✅ Validation passed');
+      return;
     }
-  }
-
-  /* -------------------------------------------------- 5. Optional markdown-lint pass */
-  await lintAllReferencedMd(errs);
-
-  /* -------------------------------------------------- 6. Finish up */
-  exitIfErr();
-
-  /* ──────────── Local helpers ──────────── */
-
-  function exitIfErr(): never | void {
-    if (!errs.length) return;
     console.error('\n❌  Validation errors:');
-    errs.forEach((e, i) => console.error(`${i + 1}. ${e.path} – ${e.reason}`));
-    console.error('❌ Validation failed');
+    errors.forEach((e, i) => console.error(`${i + 1}. ${e.path} – ${e.reason}`));
     process.exit(1);
   }
 }
 
-/* ───────────────────────── Internal helpers ───────────────────────── */
-
-function findCfgFile(root: string): string | null {
-  const file = fs.readdirSync(root).find(f => f.endsWith('.cfg'));
-  return file ? path.join(root, file) : null;
-}
+/* ---------- file / dir helpers ---------- */
 
 function safeParseXml(p: string, errs: Err[]): any {
   try {
@@ -91,64 +75,58 @@ function safeParseXml(p: string, errs: Err[]): any {
 function checkDir(rel: string | undefined, label: string, errs: Err[], root: string) {
   if (!rel) return;
   const abs = path.resolve(root, rel);
-  if (!fs.existsSync(abs)) {
-    errs.push({ path: rel, reason: `${label} not found` });
-  } else if (!fs.statSync(abs).isDirectory()) {
-    errs.push({ path: rel, reason: `${label} is not a directory` });
-  }
+  if (!fs.existsSync(abs)) errs.push({ path: rel, reason: `${label} not found` });
+  else if (!fs.statSync(abs).isDirectory()) errs.push({ path: rel, reason: `${label} is not a directory` });
 }
+
+/* ---------- .tree validation ---------- */
 
 function validateTree(treePath: string, topicsAbs: string, errs: Err[]) {
   const xmlObj = safeParseXml(treePath, errs)['instance-profile'];
-  if (!xmlObj) {
-    errs.push({ path: treePath, reason: 'Missing <instance-profile>' });
-    return;
-  }
+  if (!xmlObj) { errs.push({ path: treePath, reason: 'Missing <instance-profile>' }); return; }
 
   const instId = xmlObj['@_id'] ?? '(unknown)';
 
-  // Validate start-page
-  if (xmlObj['@_start-page']) {
-    checkTopic(xmlObj['@_start-page'], 'Start page', instId);
-  }
-
-  // Recurse TOC elements
-  const roots = normalize(xmlObj['toc-element']);
-  roots.forEach(walkToc);
+  if (xmlObj['@_start-page']) checkTopic(xmlObj['@_start-page'], 'Start page', instId);
+  normalize(xmlObj['toc-element']).forEach(walkToc);
 
   function walkToc(node: any) {
     if (!node) return;
-    if (node['@_topic']) {
-      checkTopic(node['@_topic'], 'TOC element', instId);
-    }
+    if (node['@_topic']) checkTopic(node['@_topic'], 'TOC element', instId);
     normalize(node['toc-element']).forEach(walkToc);
   }
 
   function checkTopic(relTopic: string, ctx: string, id: string) {
     const full = path.join(topicsAbs, relTopic);
-    if (!fs.existsSync(full)) {
-      errs.push({ path: relTopic, reason: `${ctx} for '${id}' not found` });
-    } else if (path.extname(full) !== '.md') {
-      errs.push({ path: relTopic, reason: `${ctx} for '${id}' is not .md` });
-    }
+    if (!fs.existsSync(full)) errs.push({ path: relTopic, reason: `${ctx} for '${id}' not found` });
+    else if (path.extname(full) !== '.md') errs.push({ path: relTopic, reason: `${ctx} for '${id}' is not .md` });
   }
 
-  function normalize(x: any): any[] {
-    if (!x) return [];
-    return Array.isArray(x) ? x : [x];
-  }
+  function normalize(x: any): any[] { return !x ? [] : Array.isArray(x) ? x : [x]; }
 }
 
-/** Run markdown-lint over each referenced .md that actually exists */
-async function lintAllReferencedMd(errs: Err[]): Promise<void> {
-  const paths = errs
-    .filter(e => !e.reason.includes('not found'))
-    .map(e => e.path)
-    .filter(p => p.endsWith('.md') && fs.existsSync(p));
+/* ---------- lint all topics ---------- */
+
+async function lintAllTopics(
+  topicsAbs: string,
+  imagesAbs: string | undefined,
+  _errs: Err[]
+): Promise<void> {
+  if (!topicsAbs || !fs.existsSync(topicsAbs)) return;
+
+  const mdFiles: string[] = [];
+  (function walk(dir: string) {
+    for (const entry of fs.readdirSync(dir)) {
+      const abs = path.join(dir, entry);
+      const s   = fs.statSync(abs);
+      if (s.isDirectory()) walk(abs);
+      else if (entry.endsWith('.md')) mdFiles.push(abs);
+    }
+  })(topicsAbs);
 
   const lintErrs: ValidationResult[] = [];
-  for (const p of paths) {
-    const res = await validateMarkdown(p);
+  for (const file of mdFiles) {
+    const res = await validateMarkdown(file, imagesAbs);
     if (res.errors.length) lintErrs.push(res);
   }
   if (!lintErrs.length) return;

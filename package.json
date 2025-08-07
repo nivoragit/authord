@@ -5,11 +5,11 @@
   "main": "index.js",
   "private": true,
   "workspaces": [
-    "packages/core",
     "packages/cli",
-    "packages/renderer-html"
+    "packages/renderer"
   ],
   "scripts": {
+    "build": "PATH=$(npm bin):$PATH tsc --build",
     "prepare": "husky install",
     "test": "jest"
   },
