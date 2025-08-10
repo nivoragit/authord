@@ -63,6 +63,16 @@ export interface AttachmentResponse {
 export interface PageHit { id: string; nextVersion: number; }
 export interface PropertyData { key: string; value: string; version: { number: number } }
 
+export interface PublishSingleOptions {
+  md: string;
+  images: string;
+  baseUrl: string;
+  token: string;
+  space?: string;     // required only when creating (no pageId)
+  pageId?: string;    // update this page directly if present
+  title?: string;     // optional; when updating by id, keeps existing if omitted
+}
+
 interface AttachmentVersion { number: number; }
 interface ValidationError {
     type: 'LINK' | 'IMAGE' | 'ANCHOR';
