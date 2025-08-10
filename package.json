@@ -1,7 +1,7 @@
 {
   "name": "authord",
   "version": "1.0.0",
-  "description": "Private TypeScript module for @authord/core",
+  "description": "Private TypeScript module for @authord",
   "main": "index.js",
   "private": true,
   "workspaces": [
@@ -9,7 +9,7 @@
     "packages/renderer"
   ],
   "scripts": {
-    "build": "PATH=$(npm bin):$PATH tsc --build",
+    "build": "npm run -w @authord/renderer build && npm run -w @authord/cli build",
     "prepare": "husky install",
     "test": "jest"
   },
@@ -32,7 +32,6 @@
     "eslint-config-prettier": "^10.1.2",
     "eslint-import-resolver-typescript": "^3.5.2",
     "eslint-plugin-import": "^2.31.0",
-    "husky": "^9.1.7",
     "jest": "^29.7.0",
     "jest-mock": "^29.7.0",
     "lint-staged": "15.5.1",
