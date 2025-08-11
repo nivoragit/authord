@@ -1,0 +1,57 @@
+name: Build, Run & Scan Docker Image
+
+on:
+  push:
+    branches: [ publish-single ]
+  pull_request:
+    branches: [ publish-single ]
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Optional: login if pushing to Docker Hub
+      - name: Login to Docker Hub
+        if: secrets.DOCKER_USERNAME != '' && secrets.DOCKER_PASSWORD != ''
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build Docker image
+        run: |
+          docker build -t myapp:latest .
+
+      - name: Run container
+        run: |
+          docker run --rm -d \
+            --name myapp_container \
+            -p 8080:8080 \
+            myapp:latest
+
+      - name: Wait for container and test
+        run: |
+          sleep 5
+          curl -f http://localhost:8080 || (docker logs myapp_container && exit 1)
+
+      - name: Stop container
+        if: always()
+        run: docker stop myapp_container || true
+
+      # Trivy full scan: vulns, secrets, misconfigs
+      - name: Run Trivy scan
+        uses: aquasecurity/trivy-action@0.20.0
+        with:
+          image-ref: myapp:latest
+          format: table
+          vuln-type: 'os,library'
+          scanners: 'vuln,secret,config'
+          severity: 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL'
+          exit-code: 0 # change to 1 if you want to fail pipeline on findings
