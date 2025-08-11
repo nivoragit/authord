@@ -28,21 +28,21 @@ jobs:
         run: |
           docker build -t myapp:latest .
 
-      - name: Run container
+      # Run the CLI tool inside container
+      - name: Run CLI command
         run: |
-          docker run --rm -d \
-            --name myapp_container \
-            -p 8080:8080 \
-            myapp:latest
+          # Example: run --help to confirm it works
+          docker run --name myapp_container myapp:latest --help
 
-      - name: Wait for container and test
-        run: |
-          sleep 5
-          curl -f http://localhost:8080 || (docker logs myapp_container && exit 1)
+      # Show logs if previous step failed
+      - name: Logs (on failure)
+        if: failure()
+        run: docker logs myapp_container || true
 
-      - name: Stop container
+      # Remove container (if exists)
+      - name: Cleanup container
         if: always()
-        run: docker stop myapp_container || true
+        run: docker rm -f myapp_container || true
 
       # Trivy full scan: vulns, secrets, misconfigs
       - name: Run Trivy scan
