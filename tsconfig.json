@@ -12,7 +12,6 @@
 		"skipLibCheck": true, // Skip type checking of declaration files for faster builds
 		"forceConsistentCasingInFileNames": true, // Enforce consistent file naming
 		"types": [
-			"jest",
 			"node"
 		],
 		/* Additional Checks */
