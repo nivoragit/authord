@@ -1,5 +1,5 @@
 // File: src/utils/toc-sync.ts
-import { promises as fs } from 'fs';
+import { promises as fs } from 'node:fs';
 import { XMLParser } from 'fast-xml-parser';
 import { TocConfig, TreeNode } from './types.ts';
 

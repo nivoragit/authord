@@ -15,7 +15,7 @@ import fss               from 'node:fs';
 import path              from 'node:path';
 import { createHash }    from "node:crypto";
 import axios             from 'axios';
-import { Buffer } from "node:buffer";
+import { Buffer }        from "node:buffer";
 import { XMLParser }     from 'fast-xml-parser';
 
 import {

@@ -8,7 +8,7 @@ import fs from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import FormData from 'form-data';
-import sizeOf from 'image-size';
+import { imageSize } from 'image-size';
 import { v4 as uuidv4 } from 'uuid';
 import { AttachmentResponse, ConfluenceAttachment, ConfluenceCfg, PageHit, PropertyData, UploadResult } from './types.ts';
 
@@ -276,7 +276,7 @@ export function injectMediaNodes(
       if (width) {
         try {
           const buf  = readFileSync(path.join(imageDir, file));
-          const dims = sizeOf(buf);
+          const dims = imageSize(buf);
           if (dims.width && dims.height) {
             height = Math.round((dims.height / dims.width) * width);
           }

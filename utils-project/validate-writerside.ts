@@ -1,5 +1,5 @@
-import fs from 'fs';
-import path from 'path';
+import fs from 'node:fs';
+import path from 'node:path';
 import { XMLParser } from 'fast-xml-parser';
 import { validateMarkdown } from './markdown-validator.ts';
 import { ValidationResult } from './types.ts';

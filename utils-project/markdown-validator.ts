@@ -3,7 +3,7 @@
 // Efficient ✨ – single-pass heading + link + image validation.
 
 import fs from 'fs-extra';
-import path from 'path';
+import path from 'node:path';
 import { unified } from 'unified';
 import remarkParse from 'remark-parse';
 import { visit } from 'unist-util-visit';

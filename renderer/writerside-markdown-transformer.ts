@@ -7,10 +7,6 @@
  * Caches PNGs, links into IMAGE_DIR so imageSize() works
  *********************************************************************/
 
-import { MarkdownTransformer } from '@atlaskit/editor-markdown-transformer';
-import { defaultSchema } from '@atlaskit/adf-schema/schema-default';
-import type { Schema } from 'prosemirror-model';
-
 import { unified } from 'unified';
 import remarkParse from 'remark-parse';
 import remarkDirective from 'remark-directive';
@@ -20,7 +16,7 @@ import remarkRehype from 'remark-rehype';
 import rehypeStringify from 'rehype-stringify';
 import rehypeRaw from 'rehype-raw';
 
-import type { Parent, Node as UnistNode } from unist';
+import type { Parent, Node as UnistNode } from "npm:@types/unist@^3";
 import type { Image, Code } from 'mdast';
 
 import * as fs from 'node:fs';
@@ -32,6 +28,7 @@ import { imageSize } from 'image-size';
 
 // ⬇️ Centralized Mermaid utilities (mmdc executable)
 import { renderMermaidDefinitionToFile } from '../utils/mermaid.ts';
+import { Buffer } from "node:buffer";
 
 /* ════════════════  DEBUG HELPERS  ════════════════ */
 
@@ -347,9 +344,8 @@ const wrapXhtml = (inner: string): string =>
 
 /* ═══════════  TRANSFORMER CLASS (ASYNC)  ═══════════ */
 
-export class WritersideMarkdownTransformerDC extends MarkdownTransformer {
-  constructor(schema: Schema = defaultSchema) { super(schema); }
-
+export class WritersideMarkdownTransformerDC {
+ 
   /** Confluence storage (XHTML) — async */
   async toStorage(md: string) {
     const pre = await preprocess(md);
@@ -365,13 +361,8 @@ export class WritersideMarkdownTransformerDC extends MarkdownTransformer {
     };
   }
 
-  /** Round-trip ADF — pre-process async, then parse */
-  async toADF(md: string) {
-    const pre = await preprocess(md);
-    const round = String(await unified().use(remarkParse).process(pre));
-    return super.parse(round).toJSON();
-  }
+  
 }
 
 /** Default instance */
-export default new WritersideMarkdownTransformerDC();
+// export default new WritersideMarkdownTransformerDC();

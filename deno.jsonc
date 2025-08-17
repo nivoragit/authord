@@ -21,14 +21,6 @@
     "form-data": "npm:form-data@^4",
     "github-slugger": "npm:github-slugger@^2.0.0",
     "uuid": "npm:uuid@^11.0.3",
-
-    // Atlassian + ProseMirror
-    "@atlaskit/editor-markdown-transformer": "npm:@atlaskit/editor-markdown-transformer@latest",
-    "@atlaskit/adf-schema": "npm:@atlaskit/adf-schema@latest",
-    "@atlaskit/adf-schema/": "npm:@atlaskit/adf-schema@latest/", // enables "/schema-default"
-    "prosemirror-model": "npm:prosemirror-model@latest",
-
-    // Types-only packages (for `import type { … } from 'mdast' | 'unist'`)
     "mdast": "npm:@types/mdast@^4",
     "unist": "npm:unist@^0.0.1"
   },
@@ -46,7 +38,7 @@
   },
 
   "compilerOptions": {
-    "lib": ["esnext", "dom"],
+    "lib": ["esnext", "dom", "deno.ns"],
     "types": ["node"],
     "strict": true
   },
