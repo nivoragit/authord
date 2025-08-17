@@ -1,10 +1,10 @@
 #!/usr/bin/env -S deno run -A
-import { Command } from "npm:commander@12";
+import { Command } from "commander";
 import { makeConfluenceSingle } from "./commands/confluence-single.ts";
 
 const program = new Command()
   .name("authord")
-  .description("Authord CLI (Deno + commander)")
+  .description("Authord CLI")
   .enablePositionalOptions()
   .showHelpAfterError();
 

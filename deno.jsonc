@@ -26,14 +26,8 @@
   },
 
   "tasks": {
-    "fmt": "deno fmt",
-    "lint": "deno lint",
+    "build": "deno compile --allow-all -o bin/authord cli/mod.ts",
     "check": "deno check cli/mod.ts",
-
-    "cli": "deno run -A cli/mod.ts",
-    "confluence-single": "deno run -A cli/mod.ts confluence-single",
-
-    "mermaid:render": "deno run -A cli/scripts/mermaid_render.ts",
     "setup:deps": "deno cache cli/mod.ts"
   },
 
