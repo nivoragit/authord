@@ -1,0 +1,43 @@
+{
+  "nodeModulesDir": "auto",
+  "lock": false,
+
+  "imports": {
+    "commander": "npm:commander@12",
+    "axios": "npm:axios@^1.10",
+    "fs-extra": "npm:fs-extra@^11",
+    "fast-xml-parser": "npm:fast-xml-parser@^4",
+    "zod": "npm:zod@^3",
+    "unist-util-visit": "npm:unist-util-visit@^5",
+    "remark-parse": "npm:remark-parse@^11",
+    "remark-gfm": "npm:remark-gfm@^4",
+    "remark-directive": "npm:remark-directive@^4",
+    "remark-rehype": "npm:remark-rehype@^11",
+    "rehype-raw": "npm:rehype-raw@^7",
+    "rehype-stringify": "npm:rehype-stringify@^10",
+    "unified": "npm:unified@^11",
+    "image-size": "npm:image-size@^2",
+    "form-data": "npm:form-data@^4"
+  },
+
+  "tasks": {
+    "fmt": "deno fmt",
+    "lint": "deno lint",
+    "check": "deno check cli/mod.ts",
+
+    "cli": "deno run -A cli/mod.ts",
+    "confluence-single": "deno run -A cli/mod.ts confluence-single",
+
+    "mermaid:render": "deno run -A cli/scripts/mermaid_render.ts",
+    "setup:deps": "deno cache cli/mod.ts"
+  },
+
+  "compilerOptions": {
+    "lib": ["esnext", "dom"],
+    "types": ["node"],
+    "strict": true
+  },
+
+  "fmt": { "lineWidth": 100 },
+  "lint": { "rules": { "tags": ["recommended"] } }
+}

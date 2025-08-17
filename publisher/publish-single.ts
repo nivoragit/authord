@@ -15,6 +15,7 @@ import fss               from 'fs';
 import path              from 'path';
 import { createHash }    from 'crypto';
 import axios             from 'axios';
+import { Buffer } from "node:buffer";
 import { XMLParser }     from 'fast-xml-parser';
 
 import {
@@ -25,11 +26,8 @@ import {
   setRemoteHash,
 } from './utils/confluence-utils';
 import { WritersideMarkdownTransformerDC } from '@authord/renderer';
-import type { ConfluenceCfg, PublishSingleOptions } from './utils/types';
-
-// Optional: use Authord JSON if present
-// (File exists in your utils per other modules)
-import { readConfig as readAuthordConfig } from './utils/readConfig';
+import type { ConfluenceCfg, PublishSingleOptions } from '../utils-project/types';
+import { readConfig as readAuthordConfig } from '../utils-project/readConfig';
 
 
 

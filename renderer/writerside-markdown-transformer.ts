@@ -2,15 +2,9 @@
  * writerside-markdown-transformer.ts
  * Confluence DC/Server — strict-XHTML + auto-copied diagrams
  *
- * Mermaid cascade (with persistent debug log):
- *   (1) JS API (puppeteer direct dep) →
- *   (2) JS API (puppeteer transitively via @mermaid-js/mermaid-cli) →
- *   (3) CLI fallback (mmdc) only if AUTHORD_MERMAID_FALLBACK_CLI=1
- *
+ * Mermaid rendering: CLI via `mmdc` executable through utils/mermaid.ts
  * PlantUML optional; if jar missing/disabled → keep code block
  * Caches PNGs, links into IMAGE_DIR so imageSize() works
- * Clean shutdown: closes Puppeteer on exit/signals/errors
- * CommonJS-compatible (no import.meta)
  *********************************************************************/
 
 import { MarkdownTransformer } from '@atlaskit/editor-markdown-transformer';
@@ -29,13 +23,15 @@ import rehypeRaw from 'rehype-raw';
 import type { Parent, Node as UnistNode } from 'unist';
 import type { Image, Code } from 'mdast';
 
-import { execFileSync } from 'child_process';
-import * as fs from 'fs';
-import * as fsp from 'fs/promises';
-import * as path from 'path';
-import { tmpdir, homedir } from 'os';
+import * as fs from 'node:fs';
+import * as fsp from 'node:fs/promises';
+import * as path from 'node:path';
+import * as os from 'node:os';
+import * as process from 'node:process';
 import { imageSize } from 'image-size';
-import { createRequire } from 'module';
+
+// ⬇️ Centralized Mermaid utilities (mmdc executable)
+import { renderMermaidDefinitionToFile } from '../utils/mermaid.ts';
 
 /* ════════════════  DEBUG HELPERS  ════════════════ */
 
@@ -43,17 +39,8 @@ const DEBUG = /^(1|true|on|yes)$/i.test(String(process.env.AUTHORD_DEBUG ?? ''))
 const dbg = (...a: any[]) => { if (DEBUG) console.log('[authord:debug]', ...a); };
 const warn = (...a: any[]) => console.warn('[authord]', ...a);
 
-function readPkg(name: string) {
-  try {
-    const req = createRequire(__filename);
-    const pkgPath = req.resolve(`${name}/package.json`);
-    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-    return { version: pkg.version, path: pkgPath };
-  } catch { return null; }
-}
-
 /* ───────── Persistent Mermaid debug log ───────── */
-const WORK_DIR = path.join(tmpdir(), 'writerside-diagrams');
+const WORK_DIR = path.join(os.tmpdir(), 'writerside-diagrams');
 fs.mkdirSync(WORK_DIR, { recursive: true });
 const MERMAID_LOG_FILE = path.join(WORK_DIR, 'mermaid-debug.log');
 
@@ -78,16 +65,11 @@ function logEnvOnce() {
   const prev = tailMermaidLog(Math.max(1, Math.min(200, lines)));
   dbg('node', process.version, process.platform, process.arch);
   dbg('env', {
-    AUTHORD_HEADLESS: process.env.AUTHORD_HEADLESS,
-    AUTHORD_MERMAID_FALLBACK_CLI: process.env.AUTHORD_MERMAID_FALLBACK_CLI,
-    PUPPETEER_EXECUTABLE_PATH: process.env.PUPPETEER_EXECUTABLE_PATH,
+    AUTHORD_MERMAID_LOG_LINES: process.env.AUTHORD_MERMAID_LOG_LINES,
+    AUTHORD_IMAGE_DIR: process.env.AUTHORD_IMAGE_DIR,
     MMD_WIDTH: process.env.MMD_WIDTH, MMD_HEIGHT: process.env.MMD_HEIGHT,
     MMD_SCALE: process.env.MMD_SCALE, MMD_BG: process.env.MMD_BG,
     MERMAID_LOG_FILE,
-  });
-  dbg('deps', {
-    puppeteer: readPkg('puppeteer'),
-    mermaidCli: readPkg('@mermaid-js/mermaid-cli'),
   });
   if (prev.length) {
     dbg('mermaid.prev', `── last ${prev.length} log lines from ${MERMAID_LOG_FILE} ──`);
@@ -99,12 +81,7 @@ function logEnvOnce() {
 
 /* ═════════════════  CONSTANTS & HELPERS  ═════════════════ */
 
-const esImport = <T = any>(specifier: string) =>
-  // using Function avoids TS compiling `import()` to require()
-  (Function('s', 'return import(s)') as (s: string) => Promise<T>)(specifier);
-
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
-
 const isOn = (v?: string) => /^(1|true|on|yes)$/i.test(String(v ?? ''));
 
 /** Resolve PlantUML jar if present; return null if missing or disabled. */
@@ -112,10 +89,10 @@ function resolvePlantumlJar(): string | null {
   const disabled = String(process.env.AUTHORD_PLANTUML ?? '').match(/^(0|off|false)$/i);
   if (disabled) return null;
 
-  const expandHome = (p?: string) => p?.replace(/^~(?=$|[\\/])/, homedir());
+  const expandHome = (p?: string) => p?.replace(/^~(?=$|[\\/])/, os.homedir());
   const envJar = expandHome(process.env.PLANTUML_JAR);
-  const vendor = path.resolve(__dirname, '../vendor/plantuml.jar');
-  const homeJar = path.resolve(homedir(), 'bin/plantuml.jar');
+  const vendor = path.resolve(process.cwd(), 'vendor/plantuml.jar');
+  const homeJar = path.resolve(os.homedir(), 'bin/plantuml.jar');
 
   for (const p of [envJar, vendor, homeJar]) {
     if (p && fs.existsSync(p)) return p;
@@ -142,152 +119,22 @@ function isPngFileOK(p: string): boolean {
   } catch { return false; }
 }
 
-/* ═════════════  MERMAID (JS API) + CLEAN SHUTDOWN  ═════════════ */
+/* ═════════════  MERMAID via central utils (mmdc)  ═════════════ */
 
-let browserPromise: Promise<any> | null = null;
-let closingBrowser = false;
-let hooksRegistered = false;
+async function renderMermaidPngTo(outFile: string, definition: string): Promise<void> {
+  const opts = {
+    // Pull sizing/theming from env if present
+    width: process.env.MMD_WIDTH ? Number(process.env.MMD_WIDTH) : undefined,
+    height: process.env.MMD_HEIGHT ? Number(process.env.MMD_HEIGHT) : undefined,
+    scale: process.env.MMD_SCALE ? Number(process.env.MMD_SCALE) : undefined,
+    backgroundColor: process.env.MMD_BG,
+    theme: process.env.MMD_THEME,
+    configFile: process.env.MMD_CONFIG,
+    quiet: true,
+  } as const;
 
-function launchArgs() {
-  const args = ['--no-sandbox', '--disable-setuid-sandbox'];
-  if (DEBUG || process.env.AUTHORD_CHROME_VERBOSE === '1') {
-    args.push('--enable-logging=stderr', '--v=1');
-  }
-  return args;
-}
-
-/** Try several headless modes for maximum compatibility. */
-async function getBrowser() {
-  if (!browserPromise) {
-    browserPromise = (async () => {
-      // FIX 1: use esImport so bundlers/ts don’t rewrite to require()
-      const puppeteer = (await esImport<any>('puppeteer')).default;
-      const preferred = (process.env.AUTHORD_HEADLESS ?? 'shell') as any;
-      const trials: any[] = [preferred, 'new', true]; // try in this order
-
-      let lastErr: unknown = null;
-      for (const mode of trials) {
-        try {
-          dbg('puppeteer.launch try', { headless: mode, args: launchArgs() });
-          const browser = await puppeteer.launch({ headless: mode, args: launchArgs() });
-          registerShutdownHooks();
-          dbg('puppeteer.launch success', { headless: mode });
-          return browser;
-        } catch (e) {
-          lastErr = e;
-          dbg('puppeteer.launch failed', { headless: mode, err: (e as any)?.message ?? e });
-        }
-      }
-      throw new Error(`Puppeteer failed in modes [${trials.join(', ')}]: ${(lastErr as any)?.message ?? lastErr}`);
-    })();
-  }
-  return browserPromise;
-}
-
-async function closeBrowser(): Promise<void> {
-  if (!browserPromise || closingBrowser) return;
-  closingBrowser = true;
-  try {
-    const br = await browserPromise;
-    if (br && typeof br.close === 'function') {
-      await br.close();
-    }
-  } catch {
-    // swallow
-  } finally {
-    browserPromise = null;
-    closingBrowser = false;
-  }
-}
-
-function registerShutdownHooks() {
-  if (hooksRegistered) return;
-  hooksRegistered = true;
-
-  const wrap = (exitCode?: number) => {
-    return () => {
-      (async () => {
-        await closeBrowser();
-        if (typeof exitCode === 'number') process.exit(exitCode);
-      })().catch(() => process.exit(typeof exitCode === 'number' ? exitCode : 0));
-    };
-  };
-
-  // Signals: close then exit
-  process.on('SIGINT', wrap(130));   // Ctrl+C
-  process.on('SIGTERM', wrap(143));
-  process.on('SIGHUP', wrap(129));
-
-  // beforeExit: Node is about to exit naturally — just close browser
-  process.on('beforeExit', async () => { await closeBrowser(); });
-
-  // Crash paths: report, close, then exit(1)
-  process.on('uncaughtException', (err) => {
-    console.error(err);
-    (async () => { await closeBrowser(); process.exit(1); })();
-  });
-  process.on('unhandledRejection', (reason) => {
-    console.error('Unhandled rejection:', reason);
-    (async () => { await closeBrowser(); process.exit(1); })();
-  });
-}
-
-/* ───────── bin helper for CLI fallback ───────── */
-function resolveBin(binName: string): string {
-  const suffix = process.platform === 'win32' ? '.cmd' : '';
-  const local = path.resolve(process.cwd(), 'node_modules', '.bin', binName + suffix);
-  return fs.existsSync(local) ? local : (binName + suffix); // falls back to PATH
-}
-
-/* ───────── simple in-process telemetry (also appended to file) ───────── */
-type MermaidStep = 'step1' | 'step2' | 'step3';
-const telem = {
-  counts: { step1: 0, step2: 0, step3: 0, success: 0, fail: 0 },
-  lastSuccess: null as null | { step: MermaidStep; at: number },
-};
-
-function logAttempt(step: MermaidStep, ok: boolean, info: string) {
-  if (ok) {
-    telem.counts.success += 1;
-    telem.counts[step] += 1;
-    telem.lastSuccess = { step, at: Date.now() };
-    dbg(`mermaid ${step} SUCCESS: ${info}`);
-    appendMermaidLog(`SUCCESS via ${step}: ${info}`);
-  } else {
-    telem.counts.fail += 1;
-    dbg(`mermaid ${step} FAIL: ${info}`);
-    appendMermaidLog(`FAIL ${step}: ${info}`);
-  }
-}
-
-/** Render a Mermaid PNG with a cascade.
- * Returns raw bytes or null on failure.
- */
-async function renderMermaidPng(definition: string): Promise<Uint8Array | null> {
-  logEnvOnce();
-  try {
-    const tmpOut = path.join(
-      tmpdir(),
-      `mmd-${Date.now()}-${Math.random().toString(36).slice(2)}.png`
-    );
-    const mmdc = resolveBin('mmdc');
-    execFileSync(mmdc, ['-i', '-', '-o', tmpOut, '-q'], {
-      input: definition,
-      stdio: ['pipe', 'ignore', 'inherit'],
-      maxBuffer: 1024 * 1024 * 64,
-    });
-    const buf = fs.readFileSync(tmpOut);
-    try { fs.unlinkSync(tmpOut); } catch { }
-    logAttempt('step3', true, `CLI mmdc (${mmdc})`);
-    return new Uint8Array(buf);
-  } catch (e3) {
-    const msg = (e3 as any)?.stack ?? (e3 as any)?.message ?? String(e3);
-    warn('CLI fallback failed:', msg);
-    logAttempt('step3', false, msg);
-  }
-  appendMermaidLog('strategies failed; leaving code block intact');
-  warn('Mermaid rendering failed; keeping code block.');
-  return null;
+  await renderMermaidDefinitionToFile(definition, outFile, opts);
+  appendMermaidLog(`SUCCESS via mmdc: wrote ${path.basename(outFile)}`);
 }
 
 /* ────────── copy / hard-link PNGs into IMAGE_DIR ────────── */
@@ -327,21 +174,47 @@ async function diagramToPngAsync(lang: 'plantuml' | 'mermaid', code: string): Pr
         warn('PlantUML not available; leaving code block unchanged.');
         return null;
       }
-      const png = execFileSync('java', ['-jar', PLANTUML_JAR, '-tpng', '-pipe'],
-        { input: code, stdio: ['pipe', 'pipe', 'inherit'] });
-      await fsp.writeFile(out, png);
+
+      // PlantUML: write input to temp and run jar
+      const base = `puml-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const inFile = path.join(WORK_DIR, `${base}.puml`);
+      await fsp.writeFile(inFile, new TextEncoder().encode(code));
+
+      // Cross-runtime call
+      if (typeof (globalThis as any).Deno !== 'undefined') {
+        const D = (globalThis as any).Deno as typeof Deno;
+        const cmd = new D.Command('java', {
+          args: ['-jar', PLANTUML_JAR, '-tpng', inFile, '-o', WORK_DIR],
+          stdout: 'inherit',
+          stderr: 'inherit',
+        });
+        const res = await cmd.output();
+        if (res.code !== 0) throw new Error(`PlantUML failed with ${res.code}`);
+      } else {
+        const { spawnSync } = await import('node:child_process');
+        const res = spawnSync('java', ['-jar', PLANTUML_JAR, '-tpng', inFile, '-o', WORK_DIR], {
+          stdio: ['ignore', 'inherit', 'inherit'],
+        });
+        if (res.status !== 0) throw new Error(`PlantUML failed with ${res.status ?? -1}`);
+      }
+
+      const produced = path.join(WORK_DIR, `${base}.png`);
+      await fsp.rename(produced, out).catch(async () => { await fsp.copyFile(produced, out); });
+      try { await fsp.unlink(inFile); } catch {}
       return out;
     }
 
-    // Mermaid via cascade
-    const bytes = await renderMermaidPng(code);
-    if (!bytes) return null;
+    // Mermaid via central utility (mmdc)
+    logEnvOnce();
+    await renderMermaidPngTo(out, code);
 
-    await fsp.writeFile(out, Buffer.from(bytes));
+    if (!isPngFileOK(out)) throw new Error('mmdc produced invalid PNG');
     return out;
   } catch (e) {
     try { if (fs.existsSync(out)) await fsp.unlink(out); } catch { }
-    warn('diagramToPngAsync error:', (e as any)?.stack ?? (e as any)?.message ?? e);
+    const msg = (e as any)?.stack ?? (e as any)?.message ?? String(e);
+    warn('diagramToPngAsync error:', msg);
+    appendMermaidLog(`FAIL mmdc: ${msg}`);
     return null;
   }
 }
@@ -477,19 +350,12 @@ const wrapXhtml = (inner: string): string =>
 export class WritersideMarkdownTransformerDC extends MarkdownTransformer {
   constructor(schema: Schema = defaultSchema) { super(schema); }
 
-  /** Confluence storage (XHTML) — now async */
+  /** Confluence storage (XHTML) — async */
   async toStorage(md: string) {
     const pre = await preprocess(md);
 
-    // At the start of each transform, emit a short telemetry summary (DEBUG only)
     if (DEBUG) {
-      dbg('mermaid.summary', {
-        counts: telem.counts,
-        lastSuccess: telem.lastSuccess
-          ? { step: telem.lastSuccess.step, when: new Date(telem.lastSuccess.at).toISOString() }
-          : null,
-        logFile: MERMAID_LOG_FILE,
-      });
+      dbg('mermaid.summary', { logFile: MERMAID_LOG_FILE });
     }
 
     const html = markdownToHtml(pre);
@@ -507,5 +373,5 @@ export class WritersideMarkdownTransformerDC extends MarkdownTransformer {
   }
 }
 
-/** Default instance (methods are async now) */
+/** Default instance */
 export default new WritersideMarkdownTransformerDC();

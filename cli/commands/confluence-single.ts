@@ -1,11 +1,11 @@
-import { Command }   from 'commander';
-import path          from 'path';
-import fs            from 'fs';
-
-import { validateAuthordProject }     from '../../utils/validate-project';
-import { validateWritersideProject }  from '../../utils/validate-writerside';
-import { publishSingle }              from '../../publish-single';
-import { PublishSingleOptions }       from '../../utils/types';
+import { Command } from  "npm:commander@12";
+import * as path from    "node:path";
+import * as fs from      "node:fs";
+import { publishSingle } from "../../publisher/publish-single.ts";
+import { PublishSingleOptions } from "../../utils-project/types.ts";
+import { validateAuthordProject } from "../../utils-project/validate-project.ts";
+import { validateWritersideProject } from "../../utils-project/validate-writerside.ts";
+import process from "node:process";
 
 const PROJECT_CONFIG_FILES = ['authord.config.json', 'writerside.cfg'];
 
