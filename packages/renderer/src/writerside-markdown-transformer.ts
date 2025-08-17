@@ -14,34 +14,34 @@
  *********************************************************************/
 
 import { MarkdownTransformer } from '@atlaskit/editor-markdown-transformer';
-import { defaultSchema }       from '@atlaskit/adf-schema/schema-default';
-import type { Schema }         from 'prosemirror-model';
+import { defaultSchema } from '@atlaskit/adf-schema/schema-default';
+import type { Schema } from 'prosemirror-model';
 
-import { unified }             from 'unified';
-import remarkParse             from 'remark-parse';
-import remarkDirective         from 'remark-directive';
-import remarkGfm               from 'remark-gfm';
-import remarkStringify         from 'remark-stringify';
-import remarkRehype            from 'remark-rehype';
-import rehypeStringify         from 'rehype-stringify';
-import rehypeRaw               from 'rehype-raw';
+import { unified } from 'unified';
+import remarkParse from 'remark-parse';
+import remarkDirective from 'remark-directive';
+import remarkGfm from 'remark-gfm';
+import remarkStringify from 'remark-stringify';
+import remarkRehype from 'remark-rehype';
+import rehypeStringify from 'rehype-stringify';
+import rehypeRaw from 'rehype-raw';
 
 import type { Parent, Node as UnistNode } from 'unist';
-import type { Image, Code }               from 'mdast';
+import type { Image, Code } from 'mdast';
 
-import { execFileSync }   from 'child_process';
-import * as fs            from 'fs';
-import * as fsp           from 'fs/promises';
-import * as path          from 'path';
-import { tmpdir, homedir }from 'os';
-import { imageSize }      from 'image-size';
-import { createRequire }  from 'module';
+import { execFileSync } from 'child_process';
+import * as fs from 'fs';
+import * as fsp from 'fs/promises';
+import * as path from 'path';
+import { tmpdir, homedir } from 'os';
+import { imageSize } from 'image-size';
+import { createRequire } from 'module';
 
 /* ════════════════  DEBUG HELPERS  ════════════════ */
 
 const DEBUG = /^(1|true|on|yes)$/i.test(String(process.env.AUTHORD_DEBUG ?? ''));
-const dbg   = (...a: any[]) => { if (DEBUG) console.log('[authord:debug]', ...a); };
-const warn  = (...a: any[]) => console.warn('[authord]', ...a);
+const dbg = (...a: any[]) => { if (DEBUG) console.log('[authord:debug]', ...a); };
+const warn = (...a: any[]) => console.warn('[authord]', ...a);
 
 function readPkg(name: string) {
   try {
@@ -53,7 +53,7 @@ function readPkg(name: string) {
 }
 
 /* ───────── Persistent Mermaid debug log ───────── */
-const WORK_DIR   = path.join(tmpdir(), 'writerside-diagrams');
+const WORK_DIR = path.join(tmpdir(), 'writerside-diagrams');
 fs.mkdirSync(WORK_DIR, { recursive: true });
 const MERMAID_LOG_FILE = path.join(WORK_DIR, 'mermaid-debug.log');
 
@@ -103,7 +103,7 @@ const esImport = <T = any>(specifier: string) =>
   // using Function avoids TS compiling `import()` to require()
   (Function('s', 'return import(s)') as (s: string) => Promise<T>)(specifier);
 
-const PNG_MAGIC  = Buffer.from([0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A]);
+const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
 
 const isOn = (v?: string) => /^(1|true|on|yes)$/i.test(String(v ?? ''));
 
@@ -113,8 +113,8 @@ function resolvePlantumlJar(): string | null {
   if (disabled) return null;
 
   const expandHome = (p?: string) => p?.replace(/^~(?=$|[\\/])/, homedir());
-  const envJar  = expandHome(process.env.PLANTUML_JAR);
-  const vendor  = path.resolve(__dirname, '../vendor/plantuml.jar');
+  const envJar = expandHome(process.env.PLANTUML_JAR);
+  const vendor = path.resolve(__dirname, '../vendor/plantuml.jar');
   const homeJar = path.resolve(homedir(), 'bin/plantuml.jar');
 
   for (const p of [envJar, vendor, homeJar]) {
@@ -125,7 +125,7 @@ function resolvePlantumlJar(): string | null {
 const PLANTUML_JAR = resolvePlantumlJar();
 
 export const IMAGE_DIR = process.env.AUTHORD_IMAGE_DIR ||
-                         path.resolve(process.cwd(),'images');
+  path.resolve(process.cwd(), 'images');
 
 const VOID_RE = /<(hr|br|img|input|meta|link)(\s[^/>]*)?>/gi;          // XHTML tidy-up
 
@@ -149,9 +149,9 @@ let closingBrowser = false;
 let hooksRegistered = false;
 
 function launchArgs() {
-  const args = ['--no-sandbox','--disable-setuid-sandbox'];
+  const args = ['--no-sandbox', '--disable-setuid-sandbox'];
   if (DEBUG || process.env.AUTHORD_CHROME_VERBOSE === '1') {
-    args.push('--enable-logging=stderr','--v=1');
+    args.push('--enable-logging=stderr', '--v=1');
   }
   return args;
 }
@@ -214,9 +214,9 @@ function registerShutdownHooks() {
   };
 
   // Signals: close then exit
-  process.on('SIGINT',  wrap(130));   // Ctrl+C
+  process.on('SIGINT', wrap(130));   // Ctrl+C
   process.on('SIGTERM', wrap(143));
-  process.on('SIGHUP',  wrap(129));
+  process.on('SIGHUP', wrap(129));
 
   // beforeExit: Node is about to exit naturally — just close browser
   process.on('beforeExit', async () => { await closeBrowser(); });
@@ -265,98 +265,27 @@ function logAttempt(step: MermaidStep, ok: boolean, info: string) {
  */
 async function renderMermaidPng(definition: string): Promise<Uint8Array | null> {
   logEnvOnce();
-
-  // STEP 1 (puppeteer first)
   try {
-    dbg('step1: import puppeteer first');
-    const puppeteer = await esImport<any>('puppeteer'); // ensure installed
-    dbg('step1: import @mermaid-js/mermaid-cli');
-    const mcli = await esImport<any>('@mermaid-js/mermaid-cli'); // <- ESM path
-    const { renderMermaid } = mcli;
-
-    dbg('step1: launching browser');
-    const browser = await getBrowser();
-    dbg('step1: calling renderMermaid');
-    const { data } = await renderMermaid(browser, definition, 'png', {
-      viewport: {
-        width: parseInt(process.env.MMD_WIDTH  || '800', 10),
-        height: parseInt(process.env.MMD_HEIGHT || '600', 10),
-        deviceScaleFactor: parseInt(process.env.MMD_SCALE || '1', 10),
-      },
-      backgroundColor: process.env.MMD_BG || 'white',
-      mermaidConfig: {},
+    const tmpOut = path.join(
+      tmpdir(),
+      `mmd-${Date.now()}-${Math.random().toString(36).slice(2)}.png`
+    );
+    const mmdc = resolveBin('mmdc');
+    execFileSync(mmdc, ['-i', '-', '-o', tmpOut, '-q'], {
+      input: definition,
+      stdio: ['pipe', 'ignore', 'inherit'],
+      maxBuffer: 1024 * 1024 * 64,
     });
-    dbg('step1: render success');
-    // FIX 2: record telemetry
-    logAttempt('step1', true, 'JS API (puppeteer first)');
-    return data as Uint8Array;
-  } catch (e1) {
-    const msg = (e1 as any)?.message ?? String(e1);
-    warn('Mermaid step1 failed:', (e1 as any)?.stack ?? msg);
-    dbg('mermaid step1 FAIL:', msg);
-    logAttempt('step1', false, msg);
+    const buf = fs.readFileSync(tmpOut);
+    try { fs.unlinkSync(tmpOut); } catch { }
+    logAttempt('step3', true, `CLI mmdc (${mmdc})`);
+    return new Uint8Array(buf);
+  } catch (e3) {
+    const msg = (e3 as any)?.stack ?? (e3 as any)?.message ?? String(e3);
+    warn('CLI fallback failed:', msg);
+    logAttempt('step3', false, msg);
   }
-
-  // STEP 2 (mermaid first; puppeteer may be transitive)
-  try {
-    dbg('step2: import @mermaid-js/mermaid-cli first');
-    const mcli = await esImport<any>('@mermaid-js/mermaid-cli'); // <- ESM path
-    const { renderMermaid } = mcli;
-    dbg('step2: import puppeteer');
-    await esImport<any>('puppeteer');
-
-    dbg('step2: launching browser');
-    const browser = await getBrowser();
-    dbg('step2: calling renderMermaid');
-    const { data } = await renderMermaid(browser, definition, 'png', {
-      viewport: {
-        width: parseInt(process.env.MMD_WIDTH  || '800', 10),
-        height: parseInt(process.env.MMD_HEIGHT || '600', 10),
-        deviceScaleFactor: parseInt(process.env.MMD_SCALE || '1', 10),
-      },
-      backgroundColor: process.env.MMD_BG || 'white',
-      mermaidConfig: {},
-    });
-    dbg('step2: render success');
-    // FIX 2: record telemetry
-    logAttempt('step2', true, 'JS API (cli first)');
-    return data as Uint8Array;
-  } catch (e2) {
-    const msg = (e2 as any)?.message ?? String(e2);
-    warn('Mermaid step2 failed:', (e2 as any)?.stack ?? msg);
-    dbg('mermaid step2 FAIL:', msg);
-    logAttempt('step2', false, msg);
-  }
-
-  // ── Step 3: CLI fallback (opt-in with AUTHORD_MERMAID_FALLBACK_CLI=1) ──────
-  if (isOn(process.env.AUTHORD_MERMAID_FALLBACK_CLI)) {
-    try {
-      const tmpOut = path.join(
-        tmpdir(),
-        `mmd-${Date.now()}-${Math.random().toString(36).slice(2)}.png`
-      );
-      const mmdc = resolveBin('mmdc');
-      dbg('step3: CLI fallback', { mmdc, tmpOut });
-      execFileSync(mmdc, ['-i', '-', '-o', tmpOut, '-q'], {
-        input: definition,
-        stdio: ['pipe', 'ignore', 'inherit'],
-        maxBuffer: 1024 * 1024 * 64,
-      });
-      const buf = fs.readFileSync(tmpOut);
-      try { fs.unlinkSync(tmpOut); } catch {}
-      logAttempt('step3', true, `CLI mmdc (${mmdc})`);
-      return new Uint8Array(buf);
-    } catch (e3) {
-      const msg = (e3 as any)?.stack ?? (e3 as any)?.message ?? String(e3);
-      warn('CLI fallback failed:', msg);
-      logAttempt('step3', false, msg);
-    }
-  } else {
-    dbg('step3: CLI fallback disabled (AUTHORD_MERMAID_FALLBACK_CLI not set)');
-    appendMermaidLog('CLI fallback disabled (AUTHORD_MERMAID_FALLBACK_CLI not set)');
-  }
-
-  appendMermaidLog('All strategies failed; leaving code block intact');
+  appendMermaidLog('strategies failed; leaving code block intact');
   warn('Mermaid rendering failed; keeping code block.');
   return null;
 }
@@ -367,7 +296,7 @@ const ensureDiagramInImageDir = (() => {
   return (pngPath: string): string => {
     if (handled.has(pngPath)) return path.basename(pngPath);
 
-    const targetDir  = IMAGE_DIR;
+    const targetDir = IMAGE_DIR;
     const targetPath = path.join(targetDir, path.basename(pngPath));
 
     if (!fs.existsSync(targetPath)) {
@@ -399,7 +328,7 @@ async function diagramToPngAsync(lang: 'plantuml' | 'mermaid', code: string): Pr
         return null;
       }
       const png = execFileSync('java', ['-jar', PLANTUML_JAR, '-tpng', '-pipe'],
-                               { input: code, stdio: ['pipe','pipe','inherit'] });
+        { input: code, stdio: ['pipe', 'pipe', 'inherit'] });
       await fsp.writeFile(out, png);
       return out;
     }
@@ -411,7 +340,7 @@ async function diagramToPngAsync(lang: 'plantuml' | 'mermaid', code: string): Pr
     await fsp.writeFile(out, Buffer.from(bytes));
     return out;
   } catch (e) {
-    try { if (fs.existsSync(out)) await fsp.unlink(out); } catch {}
+    try { if (fs.existsSync(out)) await fsp.unlink(out); } catch { }
     warn('diagramToPngAsync error:', (e as any)?.stack ?? (e as any)?.message ?? e);
     return null;
   }
@@ -434,7 +363,7 @@ async function preprocess(md: string): Promise<string> {
   async function visitNode(node: UnistNode, parent?: Parent, index?: number): Promise<void> {
     // Code blocks → potential diagrams
     if (node.type === 'code' && (node as any).lang &&
-        ((node as any).lang === 'plantuml' || (node as any).lang === 'mermaid')) {
+      ((node as any).lang === 'plantuml' || (node as any).lang === 'mermaid')) {
       const png = await diagramToPngAsync((node as any).lang, (node as Code).value.trim());
       if (png && parent && typeof index === 'number') {
         const file = ensureDiagramInImageDir(png);
@@ -445,7 +374,7 @@ async function preprocess(md: string): Promise<string> {
 
     // Markdown images → attachment stubs with optional size params
     if (node.type === 'image' && parent && typeof index === 'number') {
-      const img  = node as Image;
+      const img = node as Image;
       const base = path.basename(String(img.url).split(/[?#]/)[0]);
       const params = extractSizeParamsAfterImage(parent, index);
       (parent.children as any)[index] = { type: 'html', value: makeStub(base, params) };
@@ -457,7 +386,7 @@ async function preprocess(md: string): Promise<string> {
       (node as any).value = String((node as any).value).replace(
         /<img\s+[^>]*src=["']([^"']+)["'][^>]*>/gi,
         (_m: string, src: string): string => {
-          const base   = path.basename(src.split(/[?#]/)[0]);
+          const base = path.basename(src.split(/[?#]/)[0]);
           const widthM = _m.match(/\bwidth=["'](\d+)(?:px)?["']/i);
           const params = widthM ? `width=${widthM[1]}` : '';
           return makeStub(base, params);
@@ -486,9 +415,9 @@ const markdownToHtml = (md: string) =>
       .use(remarkParse)
       .use(remarkGfm)
       .use(remarkDirective)
-      .use(remarkRehype,   { allowDangerousHtml: true })
+      .use(remarkRehype, { allowDangerousHtml: true })
       .use(rehypeRaw)
-      .use(rehypeStringify,{ allowDangerousHtml: true })
+      .use(rehypeStringify, { allowDangerousHtml: true })
       .processSync(md),
   );
 
@@ -502,18 +431,18 @@ function replacePlaceholders(html: string): string {
     (_all, file, raw = '') => {
       const paramMap = Object.fromEntries(
         raw.split(';')
-           .filter(Boolean)
-           .map((p: string) => p.split('=').map((s: string) => s.trim()))
+          .filter(Boolean)
+          .map((p: string) => p.split('=').map((s: string) => s.trim()))
       ) as Record<string, string>;
 
       /* normalise widths/heights like “450px” → “450” */
-      if (paramMap.width  ) paramMap.width  = paramMap.width.replace(/px$/i, '');
-      if (paramMap.height ) paramMap.height = paramMap.height.replace(/px$/i, '');
+      if (paramMap.width) paramMap.width = paramMap.width.replace(/px$/i, '');
+      if (paramMap.height) paramMap.height = paramMap.height.replace(/px$/i, '');
 
       const attrs: string[] = [];
-      if (paramMap.width )  attrs.push(`ac:width="${paramMap.width}"`);
-      if (paramMap.height)  attrs.push(`ac:height="${paramMap.height}"`);
-      if (attrs.length)     attrs.push('ac:thumbnail="true"');   // Server/DC needs this
+      if (paramMap.width) attrs.push(`ac:width="${paramMap.width}"`);
+      if (paramMap.height) attrs.push(`ac:height="${paramMap.height}"`);
+      if (attrs.length) attrs.push('ac:thumbnail="true"');   // Server/DC needs this
 
       /* add native dimensions when available */
       try {
@@ -529,7 +458,7 @@ function replacePlaceholders(html: string): string {
 
   /* markdown ~~strike~~ → Confluence-friendly inline style */
   html = html.replace(/<del>(.*?)<\/del>/gi,
-                      '<span style="text-decoration:line-through;">$1</span>');
+    '<span style="text-decoration:line-through;">$1</span>');
 
   return html;
 }
@@ -537,10 +466,10 @@ function replacePlaceholders(html: string): string {
 /* self-close void tags + wrap in Confluence namespace */
 const wrapXhtml = (inner: string): string =>
   `<div xmlns:ac="http://atlassian.com/content" xmlns:ri="http://atlassian.com/resource/identifier">` +
-    inner
-      .replace(VOID_RE, (_: string, tag: string, rest = '') =>
-        `<${tag}${(rest || '').trimEnd()}/>`)             // convert <hr> → <hr/>
-      .replace(/&(?!(?:[a-z]+|#\d+);)/g, '&amp;') +      // escape naked &
+  inner
+    .replace(VOID_RE, (_: string, tag: string, rest = '') =>
+      `<${tag}${(rest || '').trimEnd()}/>`)             // convert <hr> → <hr/>
+    .replace(/&(?!(?:[a-z]+|#\d+);)/g, '&amp;') +      // escape naked &
   `</div>`;
 
 /* ═══════════  TRANSFORMER CLASS (ASYNC)  ═══════════ */
@@ -550,7 +479,7 @@ export class WritersideMarkdownTransformerDC extends MarkdownTransformer {
 
   /** Confluence storage (XHTML) — now async */
   async toStorage(md: string) {
-    const pre  = await preprocess(md);
+    const pre = await preprocess(md);
 
     // At the start of each transform, emit a short telemetry summary (DEBUG only)
     if (DEBUG) {
@@ -572,7 +501,7 @@ export class WritersideMarkdownTransformerDC extends MarkdownTransformer {
 
   /** Round-trip ADF — pre-process async, then parse */
   async toADF(md: string) {
-    const pre   = await preprocess(md);
+    const pre = await preprocess(md);
     const round = String(await unified().use(remarkParse).process(pre));
     return super.parse(round).toJSON();
   }
