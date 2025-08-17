@@ -1,7 +1,7 @@
 // File: src/utils/toc-sync.ts
 import { promises as fs } from 'fs';
 import { XMLParser } from 'fast-xml-parser';
-import { TocConfig, TreeNode } from './types';
+import { TocConfig, TreeNode } from './types.ts';
 
 /**
  * Read an .tree file and extract:

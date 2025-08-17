@@ -10,10 +10,10 @@
  * • Always append orphan .md files (not in any tree) at the end
  *********************************************************************/
 
-import fs                from 'fs/promises';
-import fss               from 'fs';
-import path              from 'path';
-import { createHash }    from 'crypto';
+import fs                from 'node:fs/promises';
+import fss               from 'node:fs';
+import path              from 'node:path';
+import { createHash }    from "node:crypto";
 import axios             from 'axios';
 import { Buffer } from "node:buffer";
 import { XMLParser }     from 'fast-xml-parser';
@@ -24,10 +24,10 @@ import {
   uploadImages,
   getRemoteProperty,
   setRemoteHash,
-} from './utils/confluence-utils';
-import { WritersideMarkdownTransformerDC } from '@authord/renderer';
-import type { ConfluenceCfg, PublishSingleOptions } from '../utils-project/types';
-import { readConfig as readAuthordConfig } from '../utils-project/readConfig';
+} from '../utils-project/confluence-utils.ts';
+import { WritersideMarkdownTransformerDC } from '../renderer/writerside-markdown-transformer.ts';
+import type { ConfluenceCfg, PublishSingleOptions } from '../utils-project/types.ts';
+import { readConfig as readAuthordConfig } from '../utils-project/readConfig.ts';
 
 
 

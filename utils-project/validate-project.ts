@@ -1,8 +1,8 @@
 import fs from 'fs';
 import path from 'path';
-import { validateMarkdown } from './markdown-validator';
-import { readConfig } from './readConfig';
-import { AuthordConfig, InstanceProfile, TocElement, ValidationResult } from './types';
+import { validateMarkdown } from './markdown-validator.ts';
+import { readConfig } from './readConfig.ts';
+import { AuthordConfig, InstanceProfile, TocElement, ValidationResult } from './types.ts';
 
 /** Validates an Authord project; exits with code 1 on any error. */
 export async function validateAuthordProject(root: string = process.cwd()): Promise<void> {

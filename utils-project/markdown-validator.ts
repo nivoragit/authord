@@ -8,7 +8,7 @@ import { unified } from 'unified';
 import remarkParse from 'remark-parse';
 import { visit } from 'unist-util-visit';
 import GithubSlugger from 'github-slugger';
-import { ValidationResult } from './types';
+import { ValidationResult } from './types.ts';
 
 export async function validateMarkdown(
   filePath: string,

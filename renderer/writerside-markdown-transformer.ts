@@ -20,7 +20,7 @@ import remarkRehype from 'remark-rehype';
 import rehypeStringify from 'rehype-stringify';
 import rehypeRaw from 'rehype-raw';
 
-import type { Parent, Node as UnistNode } from 'unist';
+import type { Parent, Node as UnistNode } from unist';
 import type { Image, Code } from 'mdast';
 
 import * as fs from 'node:fs';

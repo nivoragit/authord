@@ -11,13 +11,26 @@
     "unist-util-visit": "npm:unist-util-visit@^5",
     "remark-parse": "npm:remark-parse@^11",
     "remark-gfm": "npm:remark-gfm@^4",
+    "remark-stringify": "npm:remark-stringify@^11",
     "remark-directive": "npm:remark-directive@^4",
     "remark-rehype": "npm:remark-rehype@^11",
     "rehype-raw": "npm:rehype-raw@^7",
     "rehype-stringify": "npm:rehype-stringify@^10",
     "unified": "npm:unified@^11",
     "image-size": "npm:image-size@^2",
-    "form-data": "npm:form-data@^4"
+    "form-data": "npm:form-data@^4",
+    "github-slugger": "npm:github-slugger@^2.0.0",
+    "uuid": "npm:uuid@^11.0.3",
+
+    // Atlassian + ProseMirror
+    "@atlaskit/editor-markdown-transformer": "npm:@atlaskit/editor-markdown-transformer@latest",
+    "@atlaskit/adf-schema": "npm:@atlaskit/adf-schema@latest",
+    "@atlaskit/adf-schema/": "npm:@atlaskit/adf-schema@latest/", // enables "/schema-default"
+    "prosemirror-model": "npm:prosemirror-model@latest",
+
+    // Types-only packages (for `import type { … } from 'mdast' | 'unist'`)
+    "mdast": "npm:@types/mdast@^4",
+    "unist": "npm:unist@^0.0.1"
   },
 
   "tasks": {

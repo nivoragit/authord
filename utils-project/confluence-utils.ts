@@ -4,13 +4,13 @@
  *********************************************************************/
 
 import axios from 'axios';
-import fs from 'fs/promises';
-import { readFileSync } from 'fs';
-import path from 'path';
+import fs from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import FormData from 'form-data';
 import sizeOf from 'image-size';
 import { v4 as uuidv4 } from 'uuid';
-import { AttachmentResponse, ConfluenceAttachment, ConfluenceCfg, PageHit, PropertyData, UploadResult } from './types';
+import { AttachmentResponse, ConfluenceAttachment, ConfluenceCfg, PageHit, PropertyData, UploadResult } from './types.ts';
 
 export const authHeaders = (cfg: ConfluenceCfg) => ({
   headers: { Authorization: `Bearer ${cfg.apiToken}` },
