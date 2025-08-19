@@ -3,7 +3,7 @@
  * Flatten an Authord / Writerside project into one Confluence page
  * (Data Center / Server). Delta-aware + attachment healing.
  *
- * Efficient ordering:
+ * Ordering:
  * • Prefer Writerside .tree order from writerside.cfg (document order, DFS)
  * • Else, use Authord instances -> toc-elements (DFS)
  * • Else, alphabetical scan
@@ -19,18 +19,18 @@ import { Buffer }        from "node:buffer";
 import { XMLParser }     from 'fast-xml-parser';
 
 import {
-  findPageWithVersion,   // returns PageHit | undefined  (no title)
+  findPageWithVersion,     // returns PageHit | undefined (id + nextVersion)
   listAttachments,
   uploadImages,
   getRemoteProperty,
   setRemoteHash,
+  getPageWithVersion,
+  createPageStorage,
+  putPageStorage,
 } from '../utils-project/confluence-utils.ts';
 import { WritersideMarkdownTransformerDC } from '../renderer/writerside-markdown-transformer.ts';
 import type { ConfluenceCfg, PublishSingleOptions } from '../utils-project/types.ts';
 import { readConfig as readAuthordConfig } from '../utils-project/readConfig.ts';
-
-
-
 /* ───────── helpers ───────── */
 const sha256 = (b: Buffer) => createHash('sha256').update(b).digest('hex');
 
@@ -177,22 +177,6 @@ async function resolveMdInOrder(rootDir: string, mdDir: string): Promise<string[
   return [...primary, ...extras];
 }
 
-/** Fetch by pageId, but include title for “keep existing title” behavior. */
-async function getPageWithVersion(cfg: ConfluenceCfg, pageId: string) {
-  const url = `${cfg.baseUrl}/rest/api/content/${pageId}?expand=version,space`;
-  const { data } = await axios.get(url, { headers: { Authorization: `Bearer ${cfg.apiToken}` } });
-  return {
-    id:          String(data.id),
-    nextVersion: (data.version?.number ?? 0) + 1,
-    title:       String(data.title ?? ''),
-    spaceKey:    String(data.space?.key ?? ''),
-  };
-}
-
-const auth = (cfg: ConfluenceCfg) => ({
-  headers: { Authorization: `Bearer ${cfg.apiToken}` },
-});
-
 const extractFilenames = (xhtml: string): string[] => {
   const out: string[] = [];
   const re = /ri:filename="([^"]+)"/g;
@@ -208,7 +192,7 @@ export async function publishSingle(options: PublishSingleOptions): Promise<void
   const baseUrl   = options.baseUrl || process.env.CONF_BASE_URL || '';
   const apiToken  = options.token    || process.env.CONF_TOKEN     || '';
   const pageIdArg = options.pageId;
-  const titleArg  = options.title ?? 'Exported Documentation';
+  const titleArg  = options.title ?? 'Documentation';
   const spaceKey  = options.space;
 
   for (const [label, val] of Object.entries({ mdDir, imgDir, baseUrl, apiToken })) {
@@ -220,6 +204,20 @@ export async function publishSingle(options: PublishSingleOptions): Promise<void
 
   const cfg: ConfluenceCfg = { baseUrl, apiToken };
 
+  // ── 0) If --page-id is provided, validate it early and DO NOT fall back ──
+  type MinimalHit = { id: string; nextVersion: number };
+  let hit: MinimalHit | undefined;
+  let effectiveTitle: string = titleArg;
+
+  if (pageIdArg) {
+    console.log(`🔍 Validating provided --page-id "${pageIdArg}"…`);
+    const page = await getPageWithVersion(cfg, pageIdArg);
+    hit = { id: page.id, nextVersion: page.nextVersion };
+    effectiveTitle = options.title ?? page.title; // keep current title if not provided
+  } else {
+    console.log('🔍 No --page-id provided, will search for a page with the given space and title.');
+  }
+
   // 1) Markdown → storage-XHTML + hash (using tree/instance order)
   const orderedPaths = await resolveMdInOrder(cwd, mdDir);
   if (!orderedPaths.length) throw new Error(`No markdown files found under: ${mdDir}`);
@@ -229,18 +227,8 @@ export async function publishSingle(options: PublishSingleOptions): Promise<void
   const { value: storageHtml } = await transformer.toStorage(mdRaw);
   const hash = sha256(Buffer.from(storageHtml));
 
-  // 2) Resolve target + effectiveTitle WITHOUT reading hit.title on a union
-  type MinimalHit = { id: string; nextVersion: number };
-  let hit: MinimalHit | undefined;
-  let effectiveTitle: string;
-
-  if (pageIdArg) {
-    // Updating a known page id → we can safely read its current title
-    const page = await getPageWithVersion(cfg, pageIdArg);
-    hit = { id: page.id, nextVersion: page.nextVersion };
-    effectiveTitle = options.title ?? page.title; // keep current title if not provided
-  } else {
-    // Resolve (space, title). findPageWithVersion may return undefined.
+  // 2) Resolve target when page-id was NOT provided: (space, title)
+  if (!hit) {
     const found = await findPageWithVersion(cfg, spaceKey!, titleArg);
     hit = found ?? undefined;
     effectiveTitle = titleArg; // desired title for update/create
@@ -248,6 +236,7 @@ export async function publishSingle(options: PublishSingleOptions): Promise<void
 
   // 3) Delta check only when a page already exists
   if (hit) {
+    console.log(`🔍 Checking existing page ${hit.id} for changes…`);
     const remoteHash = await getRemoteProperty(cfg, hit.id);
     if (remoteHash?.value === hash) {
       const need = extractFilenames(storageHtml);
@@ -264,25 +253,13 @@ export async function publishSingle(options: PublishSingleOptions): Promise<void
     }
   }
 
-  // 4) Create or update body
-  const body = { storage: { value: storageHtml, representation: 'storage' } };
+  // 4) Create or update body (via utils — no axios here)
   let pageId: string;
-
   if (hit) {
-    await axios.put(
-      `${cfg.baseUrl}/rest/api/content/${hit.id}`,
-      { id: hit.id, type: 'page', title: effectiveTitle,
-        version: { number: hit.nextVersion }, body },
-      auth(cfg)
-    );
+    await putPageStorage(cfg, hit.id, effectiveTitle, hit.nextVersion, storageHtml);
     pageId = hit.id;
   } else {
-    const { data } = await axios.post(
-      `${cfg.baseUrl}/rest/api/content`,
-      { type: 'page', title: effectiveTitle, space: { key: spaceKey }, body },
-      auth(cfg)
-    );
-    pageId = String(data.id);
+    pageId = await createPageStorage(cfg, spaceKey!, effectiveTitle, storageHtml);
   }
 
   // 5) Sync attachments
