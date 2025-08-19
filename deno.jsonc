@@ -1,7 +1,5 @@
 {
   "nodeModulesDir": "auto",
-  "lock": false,
-
   "imports": {
     "commander": "npm:commander@12",
     "axios": "npm:axios@^1.10",
@@ -24,19 +22,16 @@
     "mdast": "npm:@types/mdast@^4",
     "unist": "npm:unist@^0.0.1"
   },
-
   "tasks": {
     "build": "deno compile --allow-all -o bin/authord cli/mod.ts",
     "check": "deno check cli/mod.ts",
     "setup:deps": "deno cache cli/mod.ts"
   },
-
   "compilerOptions": {
     "lib": ["esnext", "dom", "deno.ns"],
     "types": ["node"],
     "strict": true
   },
-
   "fmt": { "lineWidth": 100 },
   "lint": { "rules": { "tags": ["recommended"] } }
 }
