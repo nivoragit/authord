@@ -27,7 +27,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-liberation fonts-noto-color-emoji \
   && rm -rf /var/lib/apt/lists/*
 
-RUN  npm install -g @mermaid-js/mermaid-lib
+RUN  npm install -g @mermaid-js/mermaid-cli
 
 RUN printf '%s\n' '#!/usr/bin/env bash' \
     'exec /usr/bin/chromium --no-sandbox --disable-setuid-sandbox --disable-dev-shm-usage "$@"' \
