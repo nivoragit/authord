@@ -1,0 +1,77 @@
+name: Release
+
+on:
+  push:
+    tags: [ "v*.*.*" ]
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        run: |
+          docker build -t authord:latest .
+
+      # Run the CLI tool inside container
+      - name: Run CLI command
+        run: |
+          docker run --name authord_container authord:latest --help
+
+      # Show logs if previous step failed
+      - name: Logs (on failure)
+        if: failure()
+        run: docker logs authord_container || true
+
+      # Remove container (if exists)
+      - name: Cleanup container
+        if: always()
+        run: docker rm -f authord_container || true
+
+      # Trivy full scan
+      - name: Run Trivy scan
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: authord:latest
+          format: table
+          vuln-type: 'os,library'
+          scanners: 'vuln,secret,config'
+          severity: 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL'
+          exit-code: '0'
+          ignore-unfixed: true
+
+      # Login to GHCR
+      - name: Log in to GHCR
+        if: ${{ github.event_name != 'pull_request' }}
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tag & push to GHCR
+        if: ${{ github.event_name != 'pull_request' }}
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          IMAGE=${REGISTRY}/${IMAGE_NAME}
+
+          # Tag with version and latest
+          docker tag authord:latest $IMAGE:$VERSION
+          docker tag authord:latest $IMAGE:latest
+
+          docker push $IMAGE:$VERSION
+          docker push $IMAGE:latest

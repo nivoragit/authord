@@ -1,0 +1,283 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="SELECTIVE" />
+  </component>
+  <component name="ChangeListManager">
+    <list default="true" id="54ada631-5ec4-4003-a4d2-85de19fcb086" name="Changes" comment="refactor: restructure project to one lib">
+      <change beforePath="$PROJECT_DIR$/sample/writerside/i2.tree" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/sample/writerside/topics/child.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/sample/writerside/topics/child2.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/sample/writerside/topics/child3.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/sample/writerside/topics/content2.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/sample/writerside/topics/instance-2.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/sample/writerside/topics/starter-topic.md" beforeDir="false" afterPath="$PROJECT_DIR$/sample/writerside/topics/starter-topic.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/sample/writerside/we.tree" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/sample/writerside/writerside.cfg" beforeDir="false" afterPath="$PROJECT_DIR$/sample/writerside/writerside.cfg" afterDir="false" />
+    </list>
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="Git.Pull.Settings">
+    <option name="OPTIONS">
+      <set>
+        <option value="REBASE" />
+      </set>
+    </option>
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
+  <component name="GitHubPullRequestSearchHistory">{
+  &quot;lastFilter&quot;: {
+    &quot;state&quot;: &quot;OPEN&quot;,
+    &quot;assignee&quot;: &quot;sumihiran&quot;
+  }
+}</component>
+  <component name="GithubPullRequestsUISettings">{
+  &quot;selectedUrlAndAccountId&quot;: {
+    &quot;url&quot;: &quot;https://github.com/nivoragit/authord.git&quot;,
+    &quot;accountId&quot;: &quot;5dec2c75-9f9e-441f-8dec-e9cb85afcb48&quot;
+  }
+}</component>
+  <component name="InstanceColorv3">
+    <option name="map">
+      <map>
+        <entry key="$PROJECT_DIR$/Writerside/as.tree">
+          <value>
+            <ColorState>
+              <option name="customOrder" value="3" />
+              <option name="first">
+                <RgbState>
+                  <option name="blue" value="147" />
+                  <option name="darkBlue" value="147" />
+                  <option name="darkGreen" value="69" />
+                  <option name="darkRed" value="143" />
+                  <option name="green" value="69" />
+                  <option name="red" value="143" />
+                </RgbState>
+              </option>
+              <option name="second">
+                <RgbState>
+                  <option name="blue" value="227" />
+                  <option name="darkBlue" value="227" />
+                  <option name="darkGreen" value="114" />
+                  <option name="darkRed" value="181" />
+                  <option name="green" value="114" />
+                  <option name="red" value="181" />
+                </RgbState>
+              </option>
+            </ColorState>
+          </value>
+        </entry>
+        <entry key="$PROJECT_DIR$/sample/Writerside/as.tree">
+          <value>
+            <ColorState>
+              <option name="customOrder" value="4" />
+              <option name="first">
+                <RgbState>
+                  <option name="blue" value="112" />
+                  <option name="darkBlue" value="112" />
+                  <option name="darkGreen" value="83" />
+                  <option name="darkRed" value="215" />
+                  <option name="green" value="83" />
+                  <option name="red" value="215" />
+                </RgbState>
+              </option>
+              <option name="second">
+                <RgbState>
+                  <option name="blue" value="163" />
+                  <option name="darkBlue" value="163" />
+                  <option name="darkGreen" value="111" />
+                  <option name="darkRed" value="233" />
+                  <option name="green" value="111" />
+                  <option name="red" value="233" />
+                </RgbState>
+              </option>
+            </ColorState>
+          </value>
+        </entry>
+        <entry key="$PROJECT_DIR$/sample/writerside/i2.tree">
+          <value>
+            <ColorState>
+              <option name="customOrder" value="2" />
+              <option name="first">
+                <RgbState>
+                  <option name="blue" value="225" />
+                  <option name="darkBlue" value="225" />
+                  <option name="darkGreen" value="149" />
+                  <option name="darkRed" value="56" />
+                  <option name="green" value="149" />
+                  <option name="red" value="56" />
+                </RgbState>
+              </option>
+              <option name="second">
+                <RgbState>
+                  <option name="blue" value="234" />
+                  <option name="darkBlue" value="234" />
+                  <option name="darkGreen" value="197" />
+                  <option name="darkRed" value="81" />
+                  <option name="green" value="197" />
+                  <option name="red" value="81" />
+                </RgbState>
+              </option>
+            </ColorState>
+          </value>
+        </entry>
+        <entry key="$PROJECT_DIR$/sample/writerside/we.tree">
+          <value>
+            <ColorState>
+              <option name="customOrder" value="1" />
+              <option name="first">
+                <RgbState>
+                  <option name="blue" value="60" />
+                  <option name="darkBlue" value="60" />
+                  <option name="darkGreen" value="68" />
+                  <option name="darkRed" value="206" />
+                  <option name="green" value="68" />
+                  <option name="red" value="206" />
+                </RgbState>
+              </option>
+              <option name="second">
+                <RgbState>
+                  <option name="blue" value="65" />
+                  <option name="darkBlue" value="65" />
+                  <option name="darkGreen" value="126" />
+                  <option name="darkRed" value="231" />
+                  <option name="green" value="126" />
+                  <option name="red" value="231" />
+                </RgbState>
+              </option>
+            </ColorState>
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
+  <component name="ProjectColorInfo">{
+  &quot;customColor&quot;: &quot;&quot;,
+  &quot;associatedIndex&quot;: 7
+}</component>
+  <component name="ProjectId" id="31V7kdoO2wHzk6WEukk4hXDdMgg" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "deno.use.library": "true",
+    "git-widget-placeholder": "migrate-to-deno",
+    "last_opened_file_path": "/Users/sumihiran/Projects/authord",
+    "node.js.detected.package.eslint": "true",
+    "node.js.detected.package.tslint": "true",
+    "node.js.selected.package.eslint": "(autodetect)",
+    "node.js.selected.package.tslint": "(autodetect)",
+    "nodejs_package_manager_path": "npm",
+    "settings.editor.selected.configurable": "preferences.pluginManager",
+    "ts.external.directory.path": "/Users/sumihiran/Applications/WebStorm.app/Contents/plugins/javascript-plugin/jsLanguageServicesImpl/external",
+    "vue.rearranger.settings.migration": "true",
+    "writerside.last.selected.productauthord": "as"
+  },
+  "keyToStringList": {
+    "stardust.markdown.MarkdownSplitEditorSuppressor:keyList": [
+      "/Users/sumihiran/Projects/authord/sample/Writerside/topics/0-home-child.md",
+      "/Users/sumihiran/Projects/authord/sample/Writerside/topics/Sibling.md",
+      "/Users/sumihiran/Projects/authord/sample/Writerside/topics/home.md"
+    ]
+  }
+}]]></component>
+  <component name="RecentsManager">
+    <key name="CopyFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$" />
+    </key>
+    <key name="MoveFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$/lib/utils-project" />
+      <recent name="$PROJECT_DIR$/lib" />
+    </key>
+  </component>
+  <component name="SharedIndexes">
+    <attachedChunks>
+      <set>
+        <option value="bundled-js-predefined-d6986cc7102b-e03c56caf84a-JavaScript-WS-252.23892.411" />
+      </set>
+    </attachedChunks>
+  </component>
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="54ada631-5ec4-4003-a4d2-85de19fcb086" name="Changes" comment="" />
+      <created>1755597531097</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1755597531097</updated>
+      <workItem from="1755597532374" duration="4898000" />
+      <workItem from="1755621622544" duration="5524000" />
+      <workItem from="1755677810862" duration="890000" />
+      <workItem from="1755678704833" duration="10000" />
+      <workItem from="1755678716931" duration="25000" />
+      <workItem from="1755678748852" duration="361000" />
+    </task>
+    <task id="LOCAL-00001" summary="feat: build with alpine">
+      <option name="closed" value="true" />
+      <created>1755597583843</created>
+      <option name="number" value="00001" />
+      <option name="presentableId" value="LOCAL-00001" />
+      <option name="project" value="LOCAL" />
+      <updated>1755597583843</updated>
+    </task>
+    <task id="LOCAL-00002" summary="feat: build with alpine">
+      <option name="closed" value="true" />
+      <created>1755625979101</created>
+      <option name="number" value="00002" />
+      <option name="presentableId" value="LOCAL-00002" />
+      <option name="project" value="LOCAL" />
+      <updated>1755625979101</updated>
+    </task>
+    <task id="LOCAL-00003" summary="refactor: restructure project to one lib">
+      <option name="closed" value="true" />
+      <created>1755678481436</created>
+      <option name="number" value="00003" />
+      <option name="presentableId" value="LOCAL-00003" />
+      <option name="project" value="LOCAL" />
+      <updated>1755678481436</updated>
+    </task>
+    <option name="localTasksCounter" value="4" />
+    <servers />
+  </component>
+  <component name="TypeScriptGeneratedFilesManager">
+    <option name="version" value="3" />
+  </component>
+  <component name="Vcs.Log.Tabs.Properties">
+    <option name="TAB_STATES">
+      <map>
+        <entry key="MAIN">
+          <value>
+            <State>
+              <option name="FILTERS">
+                <map>
+                  <entry key="branch">
+                    <value>
+                      <list>
+                        <option value="migrate-to-deno" />
+                      </list>
+                    </value>
+                  </entry>
+                </map>
+              </option>
+            </State>
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="feat: build with alpine" />
+    <MESSAGE value="refactor: restructure project to one lib" />
+    <option name="LAST_COMMIT_MESSAGE" value="refactor: restructure project to one lib" />
+  </component>
+</project>

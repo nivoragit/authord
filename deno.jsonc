@@ -1,0 +1,44 @@
+{
+  "name": "@authord/authord-cli",
+  "version": "0.1.0",
+  "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nivoragit/authord.git"
+  },
+  "nodeModulesDir": "auto",
+  "imports": {
+    "commander": "npm:commander@12",
+    "axios": "npm:axios@^1.10",
+    "fs-extra": "npm:fs-extra@^11",
+    "fast-xml-parser": "npm:fast-xml-parser@^4",
+    "zod": "npm:zod@^3",
+    "unist-util-visit": "npm:unist-util-visit@^5",
+    "remark-parse": "npm:remark-parse@^11",
+    "remark-gfm": "npm:remark-gfm@^4",
+    "remark-stringify": "npm:remark-stringify@^11",
+    "remark-directive": "npm:remark-directive@^4",
+    "remark-rehype": "npm:remark-rehype@^11",
+    "rehype-raw": "npm:rehype-raw@^7",
+    "rehype-stringify": "npm:rehype-stringify@^10",
+    "unified": "npm:unified@^11",
+    "image-size": "npm:image-size@^2",
+    "form-data": "npm:form-data@^4",
+    "github-slugger": "npm:github-slugger@^2.0.0",
+    "uuid": "npm:uuid@^11.0.3",
+    "mdast": "npm:@types/mdast@^4",
+    "unist": "npm:unist@^0.0.1"
+  },
+  "tasks": {
+    "build": "deno compile --allow-all -o bin/authord lib/cli.ts",
+    "check": "deno check lib/cli.ts",
+    "setup:deps": "deno cache lib/cli.ts"
+  },
+  "compilerOptions": {
+    "lib": ["esnext", "dom", "deno.ns"],
+    "types": ["node"],
+    "strict": true
+  },
+  "fmt": { "lineWidth": 100 },
+  "lint": { "rules": { "tags": ["recommended"] } }
+}
