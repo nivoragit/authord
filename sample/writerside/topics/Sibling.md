@@ -1,4 +1,8 @@
-# About WriteSide Example
+# Page 2
+
+## Siblings
+
+This page is a root level page
 
 <!--Writerside adds this topic when you create a new documentation project.
 You can use it as a sandbox to play with Writerside features, and remove it from the TOC when you don't need it anymore.-->

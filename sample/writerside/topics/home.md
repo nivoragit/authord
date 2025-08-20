@@ -1,7 +1,4 @@
-
-
-
-# New Sample Page Title
+# Home
 
 This new paragraph includes **bold**, _italic_, <u>underline</u>, and ~~strikethrough~~.
 
@@ -44,7 +41,7 @@ console.log('Hello, world!');
 
 # Diagram Examples
 
-This document demonstrates how to embed both **Mermaid** and **PlantUML** diagrams in a Markdown file.
+This document demonstrates how to embed **Mermaid** diagrams in a Markdown file.
 
 ---
 
@@ -56,21 +53,4 @@ graph TD
     B -- Yes --> C[Keep going]
     B -- No --> D[Fix it]
     D --> B
-```
-
----
-
-## PlantUML Sequence Diagram
-
-```plantuml
-@startuml
-actor User
-participant "Web App" as Web
-participant "Database" as DB
-
-User -> Web: Request login
-Web -> DB: Validate credentials
-DB --> Web: Success
-Web --> User: Welcome message
-@enduml
 ```

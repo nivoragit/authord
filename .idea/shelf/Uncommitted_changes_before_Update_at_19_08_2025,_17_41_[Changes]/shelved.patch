@@ -1,0 +1,63 @@
+Index: Dockerfile-bak
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/Dockerfile-bak b/Dockerfile-bak
+new file mode 100644
+--- /dev/null	(date 1755599644885)
++++ b/Dockerfile-bak	(date 1755599644885)
+@@ -0,0 +1,53 @@
++
++FROM denoland/deno:alpine-2.4.4 AS builder
++
++LABEL org.opencontainers.image.title="authord-cli" \
++      org.opencontainers.image.description="Authord CLI" \
++      org.opencontainers.image.source="https://github.com/nivoragit/authord" \
++      org.opencontainers.image.licenses="GPL-2.0 license"
++
++WORKDIR /app
++
++COPY . .
++
++RUN deno cache --node-modules-dir=auto cli/mod.ts
++
++
++RUN deno compile \
++  --allow-all \
++  -o /build/authord \
++  cli/mod.ts
++
++FROM gcr.io/distroless/cc as cc
++
++FROM node:18.20-alpine3.19
++
++COPY --from=cc --chown=root:root --chmod=755 /lib/*-linux-gnu/* /usr/local/lib/
++COPY --from=cc --chown=root:root --chmod=755 /lib/ld-linux-* /lib/
++
++ENV LD_LIBRARY_PATH="/usr/lib:/usr/local/lib"
++ENV CHROME_BIN="/usr/bin/chromium-browser" \
++    PUPPETEER_SKIP_DOWNLOAD="true" 
++
++RUN apk add --no-cache chromium font-noto-cjk font-noto-emoji \
++    terminus-font ttf-dejavu ttf-freefont ttf-font-awesome \
++    ttf-inconsolata ttf-linux-libertine \
++    && fc-cache -f
++
++RUN npm install -g @mermaid-js/mermaid-cli
++
++RUN addgroup --gid 5000 authord \
++    && adduser --uid 5000 --disabled-password authord --ingroup authord \
++    && mkdir /data/ \
++    && chown authord:authord /data/ \
++    && mkdir /lib64 \
++    && ln -s /usr/local/lib/ld-linux-* /lib64/
++
++
++COPY --from=builder /build/authord /usr/local/bin/authord
++RUN chown authord:authord /usr/local/bin/authord
++
++WORKDIR /data
++USER authord
++ENTRYPOINT ["authord"]
++CMD ["--help"]
