@@ -22,8 +22,8 @@ Environment variables
   Confluence auth/config (alternatives to flags)
     CONF_BASE_URL                 ${envOrDef('CONF_BASE_URL', '(unset)')}
       Alternative to --base-url.
-    CONF_TOKEN                    ${envOrDef('CONF_TOKEN', '(unset)')}
-      Alternative to --token.
+    CONF_BASIC_AUTH              ${envOrDef('CONF_BASIC_AUTH', '(unset)')}
+      Alternative to --basic-auth (format: user:pass).
 
   Images (attachments)
     AUTHORD_IMAGE_DIR             ${envOrDef('AUTHORD_IMAGE_DIR', 'images')}
@@ -38,91 +38,78 @@ Environment variables
     MMD_BG                        ${envOrDef('MMD_BG',     'white')}
       Viewport and background color for Mermaid renders.
 
-  PlantUML (optional)
-    AUTHORD_PLANTUML              ${envOrDef('AUTHORD_PLANTUML', 'on')}
-      Disable PlantUML rendering with: off,false,0.
-    PLANTUML_JAR                  ${envOrDef('PLANTUML_JAR', '~/bin/plantuml.jar | vendor/plantuml.jar | env')}
-      Explicit path to plantuml.jar. Search order if unset:
-      $PLANTUML_JAR → ./vendor/plantuml.jar → ~/bin/plantuml.jar
-
-  Debug / Verbose logging
-    AUTHORD_DEBUG                 ${envOrDef('AUTHORD_DEBUG', '0')}
-      Enable extra debug logs during processing.
-    AUTHORD_CHROME_VERBOSE        ${envOrDef('AUTHORD_CHROME_VERBOSE', '0')}
-      Passes verbose flags to Chromium launch for Puppeteer.
-
 Notes
-  • CLI fallback (mmdc) is attempted ONLY when AUTHORD_MERMAID_FALLBACK_CLI is truthy.
-    Requires the "mmdc" binary available in PATH or node_modules/.bin.
-  • Most efficient: use JS API with Puppeteer as a direct dependency; the CLI is only a safety net.
+  • CLI renders are fastest via the JS API with Puppeteer; the CLI fallback is a safety net.
   • Headless Chromium launches with --no-sandbox and --disable-setuid-sandbox by default (good for CI/DC).
-  • PlantUML requires a Java runtime and a valid plantuml.jar. If disabled or missing,
-    PlantUML code blocks are left unchanged.
   • Generated images are cached and linked under AUTHORD_IMAGE_DIR; attachments are uploaded as needed.
 `;
-
-
 
 /* ─────────────────────────────────────────────────────────────────────────── */
 
 export function makeConfluenceSingle(): Command {
   const cmd = new Command("confluence-single")
-  .description('Flatten the whole project into one Confluence page (single process, no child spawn)')
-  .requiredOption('--base-url <url>', 'Confluence base URL')
-  .requiredOption('--token <t>',      'API token (PAT/password)')
-  .option('--space <KEY>',    'Space key (ignored if --page-id is given)')
-  .option('-i, --page-id <id>', 'Existing Confluence page ID to update')
-  .option('--title <t>',              'Page title', 'Exported Documentation')
-  .option('--md <dir>',               'Topics directory',  'topics')
-  .option('--images <dir>',           'Images directory',  'images')
-  .addHelpText('after', ENV_HELP) // ← add env docs to --help
-  .action(async (opts) => {
-    try {
-      // Validate space vs page-id
-        if (!opts.pageId && !opts.space) {
-          throw new Error("Either --space or --page-id is required (provide --space for creating a page; --page-id for updating).");
+    .description('Flatten the whole project into one Confluence page (single process, no child spawn)')
+    .argument('[dir]', 'Project root directory', '.')   // ← directory as last arg
+    .requiredOption('--base-url <url>', 'Confluence base URL')
+    .requiredOption('--basic-auth <u:p>', 'Basic authentication as user:pass')
+    .requiredOption('-i, --page-id <id>', 'Existing Confluence page ID to update') // ← required now
+    .option('--title <t>',               'Page title (defaults to current page title)')
+    .option('--md <dir>',                'Topics directory (relative to [dir])',  'topics')
+    .option('--images <dir>',            'Images directory (relative to [dir])',  'images')
+    .addHelpText('after', ENV_HELP)
+    .action(async (dirArg, opts) => {
+      try {
+        const rootDir = path.resolve(process.cwd(), dirArg ?? '.');
+
+        // Detect project type in the provided directory
+        let projectType = '';
+        for (const cfgFile of PROJECT_CONFIG_FILES) {
+          if (fs.existsSync(path.join(rootDir, cfgFile))) {
+            projectType = cfgFile.split('.')[0];
+            break;
+          }
+        }
+        if (!projectType) {
+          throw new Error('No project config found in the provided directory (authord.config.json | writerside.cfg)');
         }
 
-      const cwd = process.cwd();
-      let projectType = '';
-
-      for (const cfgFile of PROJECT_CONFIG_FILES) {
-        if (fs.existsSync(path.join(cwd, cfgFile))) {
-          projectType = cfgFile.split('.')[0];
-          break;
+        // Run validators (these commonly expect to read under CWD).
+        // We temporarily chdir to rootDir to avoid any hidden PWD assumptions.
+        const prevCwd = process.cwd();
+        process.chdir(rootDir);
+        try {
+          if (projectType === 'authord') {
+            await validateAuthordProject();
+          } else {
+            await validateWritersideProject();
+          }
+        } finally {
+          process.chdir(prevCwd);
         }
+
+        // Resolve paths relative to the provided root directory
+        const mdDir  = path.resolve(rootDir, opts.md ?? 'topics');
+        const imgDir = path.resolve(rootDir, opts.images ?? 'images');
+
+        const runOpts: PublishSingleOptions = {
+          rootDir,
+          md: mdDir,
+          images: imgDir,
+          baseUrl: opts.baseUrl || process.env.CONF_BASE_URL || '',
+          basicAuth: opts.basicAuth || process.env.CONF_BASIC_AUTH || '',
+          pageId:  opts.pageId,       // required
+          title:   opts.title,        // optional
+        };
+
+        console.log('🚀 Running single-page export...');
+        await publishSingle(runOpts);
+        console.log('✅ Done.');
+      } catch (err: any) {
+        console.error('❌ Fatal:', err?.message ?? err);
+        // Let commander decide exit code; don’t force process.exit here.
+        process.exitCode = 1;
       }
+    });
 
-      if (!projectType) {
-        throw new Error('No project config found (authord.config.json | writerside.cfg)');
-      }
-
-      projectType === 'authord'
-        ? await validateAuthordProject()
-        : await validateWritersideProject();
-
-      // Resolve paths relative to CWD for a predictable UX
-      const mdDir  = path.resolve(cwd, opts.md ?? 'topics');
-      const imgDir = path.resolve(cwd, opts.images ?? 'images');
-
-      const runOpts: PublishSingleOptions = {
-        md: mdDir,
-        images: imgDir,
-        baseUrl: opts.baseUrl || process.env.CONF_BASE_URL || '',
-        token:   opts.token   || process.env.CONF_TOKEN     || '',
-        space:   opts.pageId ? undefined : opts.space, // space only needed if we’re creating
-        pageId:  opts.pageId,
-        title:   opts.title,
-      };
-
-      console.log('🚀 Running single-page export...');
-      await publishSingle(runOpts);
-      console.log('✅ Done.');
-    } catch (err: any) {
-      console.error('❌ Fatal:', err?.message ?? err);
-      // Let commander/Deno decide exit code; don’t force process.exit here.
-      process.exitCode = 1;
-    }
-  });
-   return cmd;
+  return cmd;
 }

@@ -6,7 +6,6 @@ import {
   AttachmentResponse,
   ConfluenceAttachment,
   ConfluenceCfg,
-  PageHit,
   PropertyData,
   UploadResult,
 } from './types.ts';
@@ -36,27 +35,7 @@ function explainAxios(err: any): string {
 
 /* ═════════════ Content CRUD & versioning ═════════════ */
 
-export async function findPageWithVersion(
-  cfg: ConfluenceCfg,
-  spaceKey: string,
-  title: string
-): Promise<PageHit | undefined> {
-  try {
-    const { data } = await axios.get(
-      `${cfg.baseUrl}/rest/api/content`,
-      {
-        ...authHeaders(cfg),
-        params: { spaceKey, title, status: 'current', expand: 'version' },
-      }
-    );
-    const hit = data.results?.[0];
-    return hit
-      ? { id: String(hit.id), nextVersion: Number(hit.version.number) + 1 }
-      : undefined;
-  } catch (err) {
-    throw new Error(`findPageWithVersion failed: ${explainAxios(err)}`);
-  }
-}
+
 
 /** Fetch by pageId, include title & space so callers can keep current title. */
 export async function getPageWithVersion(cfg: ConfluenceCfg, pageId: string) {
@@ -71,30 +50,6 @@ export async function getPageWithVersion(cfg: ConfluenceCfg, pageId: string) {
     };
   } catch (err) {
     throw new Error(`getPageWithVersion failed: ${explainAxios(err)}`);
-  }
-}
-
-/** Create page with storage (XHTML) body — DC/Server style. */
-export async function createPageStorage(
-  cfg: ConfluenceCfg,
-  spaceKey: string,
-  title: string,
-  storageHtml: string
-): Promise<string> {
-  try {
-    const { data } = await axios.post(
-      `${cfg.baseUrl}/rest/api/content`,
-      {
-        type : 'page',
-        title,
-        space: { key: spaceKey },
-        body : { storage: { value: storageHtml, representation: 'storage' } },
-      },
-      authHeaders(cfg)
-    );
-    return String(data.id);
-  } catch (err) {
-    throw new Error(`createPageStorage failed: ${explainAxios(err)}`);
   }
 }
 

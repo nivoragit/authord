@@ -18,18 +18,16 @@ import { Buffer }        from "node:buffer";
 import { XMLParser }     from 'fast-xml-parser';
 
 import {
-  findPageWithVersion,     // returns PageHit | undefined (id + nextVersion)
   listAttachments,
   uploadImages,
   getRemoteProperty,
   setRemoteHash,
-  getPageWithVersion,
-  createPageStorage,
+  getPageWithVersion,                   // keep: to validate provided page-id & get nextVersion
   putPageStorage,
 } from './utils/confluence-utils.ts';
-import { WritersideMarkdownTransformerDC } from './writerside-markdown-transformer.ts';
+import { setImageDir, WritersideMarkdownTransformerDC } from './writerside-markdown-transformer.ts';
 import type { ConfluenceCfg, PublishSingleOptions } from './utils/types.ts';
-import { readConfig as readAuthordConfig } from './utils/readConfig.ts';
+
 /* ───────── helpers ───────── */
 const sha256 = (b: Buffer) => createHash('sha256').update(b).digest('hex');
 
@@ -122,7 +120,10 @@ async function collectMdFromAuthord(rootDir: string, mdDir: string): Promise<str
   const jsonPath = path.join(rootDir, 'authord.config.json');
   if (!fileExists(jsonPath)) return null;
 
+  // NOTE: readAuthordConfig should resolve relative to rootDir
+  const { readConfig: readAuthordConfig } = await import('./utils/readConfig.ts');
   const cfg = await readAuthordConfig(rootDir);
+
   const orderedRel: string[] = [];
   const seen = new Set<string>();
 
@@ -185,40 +186,35 @@ const extractFilenames = (xhtml: string): string[] => {
 };
 
 export async function publishSingle(options: PublishSingleOptions): Promise<void> {
-  const cwd       = process.cwd();
-  const mdDir     = path.resolve(cwd, options.md);
-  const imgDir    = path.resolve(cwd, options.images);
-  const baseUrl   = options.baseUrl || process.env.CONF_BASE_URL || '';
-  const apiToken  = options.token    || process.env.CONF_TOKEN     || '';
-  const pageIdArg = options.pageId;
-  const titleArg  = options.title ?? 'Documentation';
-  const spaceKey  = options.space;
+  // Root directory is explicit if provided; otherwise fall back to CWD.
+  const rootDir   = options.rootDir ?? process.cwd();
+  const mdDir     = path.resolve(rootDir, options.md);
+  const imgDir    = path.resolve(rootDir, options.images);
+  const baseUrl   = options.baseUrl;
+  const apiToken  = options.basicAuth ;
+  const pageIdArg = options.pageId;                      // REQUIRED now
+  const titleArg  = options.title;                       // optional override
 
   for (const [label, val] of Object.entries({ mdDir, imgDir, baseUrl, apiToken })) {
     if (!val) throw new Error(`Missing required option: ${label}`);
   }
-  if (!pageIdArg && !spaceKey) {
-    throw new Error('Missing required option: space (only needed when page-id is absent)');
+  if (!pageIdArg) {
+    throw new Error('Missing required option: pageId (page ID is now mandatory; no search/fallback).');
   }
 
   const cfg: ConfluenceCfg = { baseUrl, apiToken };
-
-  // ── 0) If --page-id is provided, validate it early and DO NOT fall back ──
-  type MinimalHit = { id: string; nextVersion: number };
-  let hit: MinimalHit | undefined;
-  let effectiveTitle: string = titleArg;
-
-  if (pageIdArg) {
-    console.log(`🔍 Validating provided --page-id "${pageIdArg}"…`);
-    const page = await getPageWithVersion(cfg, pageIdArg);
-    hit = { id: page.id, nextVersion: page.nextVersion };
-    effectiveTitle = options.title ?? page.title; // keep current title if not provided
-  } else {
-    console.log('🔍 No --page-id provided, will search for a page with the given space and title.');
+  if(!process.env.AUTHORD_IMAGE_DIR){
+    setImageDir(imgDir);
   }
+  
+  // ── Strict: Validate provided --page-id and do not fall back ──
+  type MinimalHit = { id: string; nextVersion: number; title: string };
+  console.log(`🔍 Validating provided --page-id "${pageIdArg}"…`);
+  const page = await getPageWithVersion(cfg, pageIdArg);
+  const hit: MinimalHit = { id: page.id, nextVersion: page.nextVersion, title: page.title };
 
   // 1) Markdown → storage-XHTML + hash (using tree/instance order)
-  const orderedPaths = await resolveMdInOrder(cwd, mdDir);
+  const orderedPaths = await resolveMdInOrder(rootDir, mdDir);
   if (!orderedPaths.length) throw new Error(`No markdown files found under: ${mdDir}`);
 
   const mdRaw = (await Promise.all(orderedPaths.map(p => readText(p)))).join('\n\n');
@@ -226,51 +222,37 @@ export async function publishSingle(options: PublishSingleOptions): Promise<void
   const { value: storageHtml } = await transformer.toStorage(mdRaw);
   const hash = sha256(Buffer.from(storageHtml));
 
-  // 2) Resolve target when page-id was NOT provided: (space, title)
-  if (!hit) {
-    const found = await findPageWithVersion(cfg, spaceKey!, titleArg);
-    hit = found ?? undefined;
-    effectiveTitle = titleArg; // desired title for update/create
-  }
-
-  // 3) Delta check only when a page already exists
-  if (hit) {
-    console.log(`🔍 Checking existing page ${hit.id} for changes…`);
-    const remoteHash = await getRemoteProperty(cfg, hit.id);
-    if (remoteHash?.value === hash) {
-      const need = extractFilenames(storageHtml);
-      const have = await listAttachments(cfg, hit.id);
-      const miss = need.filter(f => !have.has(f));
-      if (!miss.length) {
-        console.log('⏩ Nothing changed – skipping upload.');
-        return;
-      }
-      console.log(`📸 Healing ${miss.length} missing attachment(s)…`);
-      await Promise.all(miss.map(f => uploadImages(cfg, hit!.id, path.join(imgDir, f))));
-      console.log('✅ Attachments healed – done.');
+  // 2) Delta check (existing page only; no create path)
+  console.log(`🔍 Checking existing page ${hit.id} for changes…`);
+  const remoteHash = await getRemoteProperty(cfg, hit.id);
+  if (remoteHash?.value === hash) {
+    const need = extractFilenames(storageHtml);
+    const have = await listAttachments(cfg, hit.id);
+    const miss = need.filter(f => !have.has(f));
+    if (!miss.length) {
+      console.log('⏩ Nothing changed – skipping upload.');
       return;
     }
+    console.log(`📸 Healing ${miss.length} missing attachment(s)…`);
+    await Promise.all(miss.map(f => uploadImages(cfg, hit.id, path.join(imgDir, f))));
+    console.log('✅ Attachments healed – done.');
+    return;
   }
 
-  // 4) Create or update body (via utils — no axios here)
-  let pageId: string;
-  if (hit) {
-    await putPageStorage(cfg, hit.id, effectiveTitle, hit.nextVersion, storageHtml);
-    pageId = hit.id;
-  } else {
-    pageId = await createPageStorage(cfg, spaceKey!, effectiveTitle, storageHtml);
-  }
+  // 3) Update body only (no auto-create)
+  const effectiveTitle = titleArg ?? hit.title;
+  await putPageStorage(cfg, hit.id, effectiveTitle, hit.nextVersion, storageHtml);
 
-  // 5) Sync attachments
+  // 4) Sync attachments
   const need = extractFilenames(storageHtml);
-  const have = await listAttachments(cfg, pageId);
+  const have = await listAttachments(cfg, hit.id);
   const miss = need.filter(f => !have.has(f));
   if (miss.length) {
     console.log(`📸 Uploading ${miss.length} attachment(s)…`);
-    await Promise.all(miss.map(f => uploadImages(cfg, pageId, path.join(imgDir, f))));
+    await Promise.all(miss.map(f => uploadImages(cfg, hit.id, path.join(imgDir, f))));
   }
 
-  // 6) Persist hash
-  await setRemoteHash(cfg, pageId, hash);
-  console.log(`✅ Published “${effectiveTitle}” (id ${pageId})`);
+  // 5) Persist hash
+  await setRemoteHash(cfg, hit.id, hash);
+  console.log(`✅ Published “${effectiveTitle}” (id ${hit.id})`);
 }

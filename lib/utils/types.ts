@@ -63,14 +63,24 @@ export interface AttachmentResponse {
 export interface PageHit { id: string; nextVersion: number; }
 export interface PropertyData { key: string; value: string; version: { number: number } }
 
+
 export interface PublishSingleOptions {
+  /** Absolute or relative path to topics dir (resolved against rootDir if relative) */
   md: string;
+  /** Absolute or relative path to images dir (resolved against rootDir if relative) */
   images: string;
+
   baseUrl: string;
-  token: string;
-  space?: string;     // required only when creating (no pageId)
-  pageId?: string;    // update this page directly if present
-  title?: string;     // optional; when updating by id, keeps existing if omitted
+  basicAuth: string; // "user:pass"
+
+  /** Mandatory: ID of the Confluence page to update. */
+  pageId: string;
+
+  /** Optional: override page title; defaults to existing title. */
+  title?: string;
+
+  /** Optional: explicit project root directory; defaults to process.cwd(). */
+  rootDir?: string;
 }
 
 interface AttachmentVersion { number: number; }
