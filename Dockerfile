@@ -3,7 +3,7 @@ FROM denoland/deno:debian-2.4.4 AS builder
 LABEL org.opencontainers.image.title="authord-cli" \
       org.opencontainers.image.description="Authord CLI" \
       org.opencontainers.image.source="https://github.com/nivoragit/authord" \
-      org.opencontainers.image.licenses="GPL-2.0 license"
+      org.opencontainers.image.licenses="AGPL-3.0-only"
 
 WORKDIR /app
 
