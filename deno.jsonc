@@ -23,9 +23,9 @@
     "unist": "npm:unist@^0.0.1"
   },
   "tasks": {
-    "build": "deno compile --allow-all -o bin/authord cli/mod.ts",
-    "check": "deno check cli/mod.ts",
-    "setup:deps": "deno cache cli/mod.ts"
+    "build": "deno compile --allow-all -o bin/authord lib/cli.ts",
+    "check": "deno check lib/cli.ts",
+    "setup:deps": "deno cache lib/cli.ts"
   },
   "compilerOptions": {
     "lib": ["esnext", "dom", "deno.ns"],

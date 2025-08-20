@@ -26,8 +26,7 @@ import * as os from 'node:os';
 import * as process from 'node:process';
 import { imageSize } from 'image-size';
 
-// ⬇️ Centralized Mermaid utilities (mmdc executable)
-import { renderMermaidDefinitionToFile } from '../utils/mermaid.ts';
+import { renderMermaidDefinitionToFile } from './utils/mermaid.ts';
 import { Buffer } from "node:buffer";
 
 /* ════════════════  DEBUG HELPERS  ════════════════ */
@@ -79,7 +78,6 @@ function logEnvOnce() {
 /* ═════════════════  CONSTANTS & HELPERS  ═════════════════ */
 
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
-const isOn = (v?: string) => /^(1|true|on|yes)$/i.test(String(v ?? ''));
 
 /** Resolve PlantUML jar if present; return null if missing or disabled. */
 function resolvePlantumlJar(): string | null {
@@ -345,7 +343,7 @@ const wrapXhtml = (inner: string): string =>
 /* ═══════════  TRANSFORMER CLASS (ASYNC)  ═══════════ */
 
 export class WritersideMarkdownTransformerDC {
- 
+
   /** Confluence storage (XHTML) — async */
   async toStorage(md: string) {
     const pre = await preprocess(md);
@@ -361,7 +359,7 @@ export class WritersideMarkdownTransformerDC {
     };
   }
 
-  
+
 }
 
 /** Default instance */

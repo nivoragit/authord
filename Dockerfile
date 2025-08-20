@@ -9,12 +9,12 @@ WORKDIR /app
 
 COPY . .
 
-RUN deno cache --node-modules-dir=auto cli/mod.ts
+RUN deno cache --node-modules-dir=auto lib/cli.ts
 
 RUN deno compile \
   --allow-all \
   -o /build/authord \
-  cli/mod.ts
+  lib/cli.ts
 
 FROM node:24.6-bookworm
 
@@ -27,7 +27,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-liberation fonts-noto-color-emoji \
   && rm -rf /var/lib/apt/lists/*
 
-RUN  npm install -g @mermaid-js/mermaid-cli
+RUN  npm install -g @mermaid-js/mermaid-lib
 
 RUN printf '%s\n' '#!/usr/bin/env bash' \
     'exec /usr/bin/chromium --no-sandbox --disable-setuid-sandbox --disable-dev-shm-usage "$@"' \

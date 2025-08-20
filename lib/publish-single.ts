@@ -14,7 +14,6 @@ import fs                from 'node:fs/promises';
 import fss               from 'node:fs';
 import path              from 'node:path';
 import { createHash }    from "node:crypto";
-import axios             from 'axios';
 import { Buffer }        from "node:buffer";
 import { XMLParser }     from 'fast-xml-parser';
 
@@ -27,10 +26,10 @@ import {
   getPageWithVersion,
   createPageStorage,
   putPageStorage,
-} from '../utils-project/confluence-utils.ts';
-import { WritersideMarkdownTransformerDC } from '../renderer/writerside-markdown-transformer.ts';
-import type { ConfluenceCfg, PublishSingleOptions } from '../utils-project/types.ts';
-import { readConfig as readAuthordConfig } from '../utils-project/readConfig.ts';
+} from './utils/confluence-utils.ts';
+import { WritersideMarkdownTransformerDC } from './writerside-markdown-transformer.ts';
+import type { ConfluenceCfg, PublishSingleOptions } from './utils/types.ts';
+import { readConfig as readAuthordConfig } from './utils/readConfig.ts';
 /* ───────── helpers ───────── */
 const sha256 = (b: Buffer) => createHash('sha256').update(b).digest('hex');
 

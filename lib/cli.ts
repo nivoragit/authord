@@ -1,6 +1,6 @@
 #!/usr/bin/env -S deno run -A
 import { Command } from "commander";
-import { makeConfluenceSingle } from "./commands/confluence-single.ts";
+import { makeConfluenceSingle } from "./confluence-single.ts";
 
 const program = new Command()
   .name("authord")

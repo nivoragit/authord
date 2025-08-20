@@ -1,7 +1,3 @@
-// utils/mermaid.ts
-// Cross-runtime Mermaid CLI helpers (Deno + Node).
-// Prefers local node_modules/.bin/mmdc, falls back to `npx -y mmdc`.
-
 import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";

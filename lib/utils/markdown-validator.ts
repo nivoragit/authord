@@ -1,7 +1,3 @@
-// src/utils/markdown-validator.ts
-//
-// Efficient ✨ – single-pass heading + link + image validation.
-
 import fs from 'fs-extra';
 import path from 'node:path';
 import { unified } from 'unified';
@@ -79,7 +75,7 @@ function validateImage(
     ok = fs.existsSync(resolved);
   }
 
-  
+
   // console.log(
   //   ok
   //     ? `   ✓ image OK   ${url}  →  ${resolved}`
