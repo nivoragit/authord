@@ -3,6 +3,7 @@ import path from 'node:path';
 import { XMLParser } from 'fast-xml-parser';
 import { validateMarkdown } from './markdown-validator.ts';
 import { ValidationResult } from './types.ts';
+import process from "node:process";
 
 type Err = { path: string; reason: string };
 

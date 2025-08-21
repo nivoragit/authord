@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
+import process from "node:process";
 
 const isDeno =
   typeof (globalThis as any).Deno !== "undefined" &&

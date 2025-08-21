@@ -25,8 +25,10 @@ import {
   getPageWithVersion,                   // keep: to validate provided page-id & get nextVersion
   putPageStorage,
 } from './utils/confluence-utils.ts';
-import { setImageDir, WritersideMarkdownTransformerDC } from './writerside-markdown-transformer.ts';
+import {WritersideMarkdownTransformerDC } from './writerside-markdown-transformer.ts';
 import type { ConfluenceCfg, PublishSingleOptions } from './utils/types.ts';
+import { setImageDir } from "./utils/images.ts";
+import process from "node:process";
 
 /* ───────── helpers ───────── */
 const sha256 = (b: Buffer) => createHash('sha256').update(b).digest('hex');
