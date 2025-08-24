@@ -32,7 +32,8 @@
   "tasks": {
     "build": "deno compile --allow-all -o bin/authord lib/cli.ts",
     "check": "deno check lib/cli.ts",
-    "setup:deps": "deno cache lib/cli.ts"
+    "setup:deps": "deno cache lib/cli.ts",
+    "test": "deno test -A"
   },
   "compilerOptions": {
     "lib": ["esnext", "dom", "deno.ns"],

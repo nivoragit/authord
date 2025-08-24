@@ -20,10 +20,10 @@ function buildStorageProcessor() {
     .use(remarkParse)
     .use(remarkGfm)
     .use(remarkDirective)
-    .use(remarkConfluenceMedia)                 // Mermaid + MD image sizing (AST, no regex)
+    .use(remarkConfluenceMedia)                 // Mermaid + MD image sizing
     .use(remarkRehype, { allowDangerousHtml: true })
     .use(rehypeRaw)                             // parse raw HTML into HAST
-    .use(rehypeConfluenceStorage)               // Convert img/input/etc. (AST, no regex)
+    .use(rehypeConfluenceStorage)               // Convert img/input/etc.
     .use(rehypeStringify, {
       allowDangerousHtml: true,
       closeSelfClosing: true,

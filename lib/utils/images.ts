@@ -29,26 +29,6 @@ export function isPngFileOK(p: string): boolean {
     return buf.length >= 8 && buf.compare(PNG_MAGIC, 0, 8, 0, 8) === 0;
   } catch { return false; }
 }
-
-/* ────────── copy / hard-link PNGs into IMAGE_DIR ────────── */
-export const ensureDiagramInImageDir = (() => {
-  const handled = new Set<string>();
-  return (pngPath: string): string => {
-    if (handled.has(pngPath)) return path.basename(pngPath);
-
-    const targetDir = IMAGE_DIR;
-    const targetPath = path.join(targetDir, path.basename(pngPath));
-
-    if (!fs.existsSync(targetPath)) {
-      fs.mkdirSync(targetDir, { recursive: true });
-      try { fs.linkSync(pngPath, targetPath); }
-      catch { fs.copyFileSync(pngPath, targetPath); }
-    }
-    handled.add(pngPath);
-    return path.basename(pngPath);
-  };
-})();
-
 /* ────────── ATTACHMENT STUBS ────────── */
 export const makeStub = (file: string, params = '') =>
   `@@ATTACH|file=${path.basename(file)}${params ? `|${params}` : ''}@@`;

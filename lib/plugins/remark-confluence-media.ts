@@ -12,7 +12,7 @@ import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import { renderMermaidDefinitionToFile } from '../utils/mermaid.ts';
-import { IMAGE_DIR, hashString, isPngFileOK, ensureDiagramInImageDir } from '../utils/images.ts';
+import { IMAGE_DIR, hashString, isPngFileOK } from '../utils/images.ts';
 import process from "node:process";
 
 
@@ -155,8 +155,8 @@ export function remarkConfluenceMedia() {
               }
 
               if (png) {
-                const file = ensureDiagramInImageDir(png);
-                const img: MdImage = { type: 'image', url: file, alt: '' };
+                const fileName = path.basename(png);
+                const img: MdImage = { type: 'image', url: fileName, alt: '' };
                 (parent as any).children[index] = paragraphOfImage(img);
               }
             })());
