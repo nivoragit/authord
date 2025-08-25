@@ -1,113 +1,215 @@
+// CLI subcommand: confluence-single
+// Binds env/flags, wires adapters, and invokes the core use case.
+// No business logic here beyond option normalization and dependency wiring.
+
 import { Command } from "commander";
 import * as path from "node:path";
-import * as fs from "node:fs";
-import process from "node:process";
+import {
+  asPageId,
+  asPath,
+  asUrl,
+  type ConfluenceCfg,
+  type PublishSingleOptions,
+  type Path,
+} from "./utils/types.ts";
+import { OrderingResolver } from "./order/ordering-resolver.ts";
+import { WritersideMarkdownTransformer } from "./writerside-markdown-transformer.ts";
+import { MermaidRenderer } from "./adapters/diagram-renderer.ts";
+import {
+  ConfluenceAttachmentRepository,
+  ConfluencePageRepository,
+  ConfluencePropertyStore,
+} from "./adapters/confluence-repos.ts";
+import { publishSingle, setPublishDeps, type PublishDeps } from "./publish-single.ts";
+import type { IFileSystem } from "./ports/ports.ts";
 
-import { publishSingle } from "./publish-single.ts";
-import type { PublishSingleOptions } from "./utils/types.ts";
-import { validateAuthordProject } from "./utils/validate-project.ts";
-import { validateWritersideProject } from "./utils/validate-writerside.ts";
-
-const PROJECT_CONFIG_FILES = ['authord.config.json', 'writerside.cfg'];
-
-/* ── Help: environment variables (shows current values + defaults) ───────── */
-function envOrDef(name: string, def: string) {
-  const v = process.env[name];
-  return v ? `${v} (current)` : `${def} (default)`;
+// ---- Local FS adapter (only what's used by the use case)
+class DenoFileSystem implements IFileSystem {
+  async readText(p: Path): Promise<string> {
+    return await Deno.readTextFile(p as unknown as string);
+  }
+  async exists(p: Path): Promise<boolean> {
+    try {
+      await Deno.stat(p as unknown as string);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  async glob(_pattern: string, _cwd?: Path): Promise<readonly Path[]> {
+    // Not needed by current use case; return empty.
+    return [];
+  }
+  async list(_dir: Path): Promise<readonly Path[]> {
+    // Not needed by current use case; return empty.
+    return [];
+  }
 }
 
-const ENV_HELP = `
-Environment variables
+// ---- Helpers
 
-  Confluence auth/config (alternatives to flags)
-    CONF_BASE_URL                 ${envOrDef('CONF_BASE_URL', '(unset)')}
-      Alternative to --base-url.
-    CONF_BASIC_AUTH              ${envOrDef('CONF_BASIC_AUTH', '(unset)')}
-      Alternative to --basic-auth (format: user:pass).
+function parseBasicAuth(input: string): { username: string; password: string } {
+  // Accept "user:pass"
+  const idx = input.indexOf(":");
+  if (idx <= 0) {
+    throw new Error(
+      `--basic-auth must be "user:pass". Got ${input}. (Bearer tokens are not yet supported)`,
+    );
+  }
+  return { username: input.slice(0, idx), password: input.slice(idx + 1) };
+}
 
-  Images (attachments)
-    AUTHORD_IMAGE_DIR             ${envOrDef('AUTHORD_IMAGE_DIR', 'images')}
-      Directory where generated PNGs are linked/copied for Confluence attachments.
+/** Resolve a possibly-relative path under the project root. */
+function resolveUnderRoot(rootDir: string, p: string): string {
+  return path.isAbsolute(p) ? p : path.resolve(rootDir, p);
+}
 
-  Mermaid rendering (JS API; Puppeteer-backed)
-    AUTHORD_MERMAID_FALLBACK_CLI  ${envOrDef('AUTHORD_MERMAID_FALLBACK_CLI', '0')}
-      Enable CLI fallback if JS API fails. Accepted truthy values: 1,true,on,yes.
-    MMD_WIDTH                     ${envOrDef('MMD_WIDTH',  '800')}
-    MMD_HEIGHT                    ${envOrDef('MMD_HEIGHT', '600')}
-    MMD_SCALE                     ${envOrDef('MMD_SCALE',  '1')}
-    MMD_BG                        ${envOrDef('MMD_BG',     'white')}
-      Viewport and background color for Mermaid renders.
+async function resolveEntrypointFile(mdArg: string): Promise<string> {
+  // If it's a file, return as-is. If it's a directory, try common names.
+  try {
+    const st = await Deno.stat(mdArg);
+    if (st.isFile) return mdArg;
+  } catch {
+    // continue as dir lookup
+  }
+  const candidates = [
+    path.join(mdArg, "start.md"),
+    path.join(mdArg, "index.md"),
+    path.join(mdArg, "README.md"),
+  ];
+  for (const p of candidates) {
+    try {
+      const st = await Deno.stat(p);
+      if (st.isFile) return p;
+    } catch {
+      // try next
+    }
+  }
+  // Fallback: first .md under mdArg (shallow)
+  try {
+    for await (const entry of Deno.readDir(mdArg)) {
+      if (entry.isFile && entry.name.toLowerCase().endsWith(".md")) {
+        return path.join(mdArg, entry.name);
+      }
+    }
+  } catch {
+    // ignore
+  }
+  // Give up; return what we got (will error later if missing)
+  return mdArg;
+}
 
-Notes
-  • CLI renders are fastest via the JS API with Puppeteer; the CLI fallback is a safety net.
-  • Headless Chromium launches with --no-sandbox and --disable-setuid-sandbox by default (good for CI/DC).
-  • Generated images are cached and linked under AUTHORD_IMAGE_DIR; attachments are uploaded as needed.
-`;
+/** Build concrete adapters (deps) from options. */
+function buildDefaultDeps(cfg: ConfluenceCfg): PublishDeps {
+  const fs = new DenoFileSystem();
+  const ordering = new OrderingResolver();
+  const transformer = new WritersideMarkdownTransformer();
+  // instantiate to trigger env-based defaults
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _renderer = new MermaidRenderer();
 
-/* ─────────────────────────────────────────────────────────────────────────── */
+  const pageRepo = new ConfluencePageRepository(cfg);
+  const attachRepo = new ConfluenceAttachmentRepository(cfg);
+  const props = new ConfluencePropertyStore(cfg);
 
+  return { fs, ordering, transformer, pageRepo, attachRepo, props };
+}
+
+/** Public helper so tests can run the action with mocked deps if desired. */
+export async function runConfluenceSingle(
+  opts: PublishSingleOptions,
+  deps?: PublishDeps,
+): Promise<void> {
+  const cfg: ConfluenceCfg = {
+    baseUrl: opts.baseUrl,
+    basicAuth: opts.basicAuth,
+  };
+  const concrete = deps ?? buildDefaultDeps(cfg);
+  setPublishDeps(concrete);
+  await publishSingle(opts);
+}
+
+/** Construct the commander Command for this subcommand. */
 export function makeConfluenceSingle(): Command {
   const cmd = new Command("confluence-single")
-    .description('Flatten the whole project into one Confluence page (single process, no child spawn)')
-    .argument('[dir]', 'Project root directory', '.')   // ← directory as last arg
-    .requiredOption('--base-url <url>', 'Confluence base URL')
-    .requiredOption('--basic-auth <u:p>', 'Basic authentication as user:pass')
-    .requiredOption('-i, --page-id <id>', 'Existing Confluence page ID to update') // ← required now
-    .option('--title <t>',               'Page title (defaults to current page title)')
-    .option('--md <dir>',                'Topics directory (relative to [dir])',  'topics')
-    .option('--images <dir>',            'Images directory (relative to [dir])',  'images')
-    .addHelpText('after', ENV_HELP)
-    .action(async (dirArg, opts) => {
+    .description(
+      "Flatten a Writerside/Authord docs set and publish it to a single Confluence page.",
+    )
+    .argument("[dir]", "Project root directory", ".")
+    .requiredOption("--base-url <url>", "Confluence base URL (or set CONF_BASE_URL env)")
+    .requiredOption(
+      "--basic-auth <user:pass>",
+      "Confluence credentials (or set CONF_BASIC_AUTH env). Format: user:pass",
+    )
+    .requiredOption("--page-id <id>", "Target Confluence page ID")
+    .option("--title <title>", "Optional title override for the page")
+    .option("--md <fileOrDir>", "Entry Markdown file or directory, relative to [dir] (default: topics)", "topics")
+    .option("-i, --images <dir>", "Images directory, relative to [dir] (default: images)", "images")
+    .addHelpText(
+      "after",
+      `
+Env variables:
+  CONF_BASE_URL      Confluence base URL (used if --base-url not provided)
+  CONF_BASIC_AUTH    Credentials as "user:pass" (used if --basic-auth not provided)
+  AUTHORD_IMAGE_DIR  Override images directory (same as --images)
+  MMD_WIDTH          Mermaid width (px)
+  MMD_HEIGHT         Mermaid height (px)
+  MMD_SCALE          Mermaid scale
+  MMD_BG             Mermaid background color (css color)
+  MMD_THEME          Mermaid theme (default, dark, forest, neutral)
+  MMD_CONFIG         Mermaid CLI config file path
+
+Notes:
+  - Bearer tokens are not yet supported in this build; use basic auth (user:pass).
+`,
+    )
+    .action(async (dirArg: string, options: Record<string, string>) => {
       try {
-        const rootDir = path.resolve(process.cwd(), dirArg ?? '.');
+        const rootDir = path.resolve(dirArg || ".");
+        const baseUrlStr = options.baseUrl || Deno.env.get("CONF_BASE_URL");
+        const basicStr = options.basicAuth || Deno.env.get("CONF_BASIC_AUTH");
+        const pageIdStr = options.pageId;
 
-        // Detect project type in the provided directory
-        let projectType = '';
-        for (const cfgFile of PROJECT_CONFIG_FILES) {
-          if (fs.existsSync(path.join(rootDir, cfgFile))) {
-            projectType = cfgFile.split('.')[0];
-            break;
-          }
-        }
-        if (!projectType) {
-          throw new Error('No project config found in the provided directory (authord.config.json | writerside.cfg)');
-        }
-
-        // Run validators (these commonly expect to read under CWD).
-        // We temporarily chdir to rootDir to avoid any hidden PWD assumptions.
-        const prevCwd = process.cwd();
-        process.chdir(rootDir);
-        try {
-          if (projectType === 'authord') {
-            await validateAuthordProject();
-          } else {
-            await validateWritersideProject();
-          }
-        } finally {
-          process.chdir(prevCwd);
-        }
-
-        // Resolve paths relative to the provided root directory
-        const mdDir  = path.resolve(rootDir, opts.md ?? 'topics');
-        const imgDir = path.resolve(rootDir, opts.images ?? 'images');
-
-        const runOpts: PublishSingleOptions = {
+        // Resolve md/images relative to the provided [dir] root
+        const mdArg = options.md || "topics";
+        const mdPath = await resolveEntrypointFile(
+          resolveUnderRoot(rootDir, mdArg),
+        );
+        const imagesDir = resolveUnderRoot(
           rootDir,
-          md: mdDir,
-          images: imgDir,
-          baseUrl: opts.baseUrl || process.env.CONF_BASE_URL || '',
-          basicAuth: opts.basicAuth || process.env.CONF_BASIC_AUTH || '',
-          pageId:  opts.pageId,       // required
-          title:   opts.title,        // optional
+          options.images || Deno.env.get("AUTHORD_IMAGE_DIR") || "images",
+        );
+
+        if (!baseUrlStr) throw new Error("Missing --base-url (or CONF_BASE_URL)");
+        if (!basicStr) throw new Error("Missing --basic-auth (or CONF_BASIC_AUTH)");
+        if (!pageIdStr) throw new Error("Missing --page-id");
+
+        const ba = parseBasicAuth(basicStr);
+
+        const psOpts: PublishSingleOptions = {
+          rootDir: asPath(rootDir),
+          md: asPath(mdPath),
+          images: asPath(imagesDir),
+          baseUrl: asUrl(baseUrlStr),
+          basicAuth: ba,
+          pageId: asPageId(pageIdStr),
+          title: options.title,
         };
 
-        console.log('🚀 Running single-page export...');
-        await publishSingle(runOpts);
-        console.log('✅ Done.');
-      } catch (err: any) {
-        console.error('❌ Fatal:', err?.message ?? err);
-        // Let commander decide exit code; don’t force process.exit here.
-        process.exitCode = 1;
+        await runConfluenceSingle(psOpts);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[authord] Error: ${msg}`);
+        // Do not hard exit (better for tests); indicate failure
+        if (typeof (globalThis as any).process !== "undefined") {
+          (globalThis as any).process.exitCode = 1;
+        } else {
+          try {
+            (Deno as any).exitCode = 1;
+          } catch {
+            // ignore
+          }
+        }
       }
     });
 

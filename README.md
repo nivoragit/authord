@@ -27,6 +27,15 @@ Validates the project, converts Markdown to Confluence **storage XHTML**, render
 
 ## Quick start (Deno)
 
+#### Tasks quickstart
+
+- Install deps for editors/CI: `deno task setup:deps`
+- Type-check: `deno task check`
+- Lint: `deno task lint`
+- Format: `deno task fmt`
+- Test: `deno task test`
+- Build native binary: `deno task build`
+
 ```bash
 deno run -A /path/to/authord/lib/cli.ts confluence-single \
   --base-url=https://<your-confluence-domain> \
@@ -55,7 +64,8 @@ deno compile -A -o bin/authord ./cli.ts
   "tasks": {
     "build": "deno compile -A -o bin/authord ./cli.ts",
     "check": "deno check ./cli.ts",
-    "setup:deps": "deno cache ./cli.ts"
+    "setup:deps": "deno cache ./cli.ts",
+    "test": "deno test -A"
   }
 }
 ```
@@ -72,7 +82,7 @@ Arguments:
 
 Required:
   --base-url <url>              Confluence base URL
-  --token <t>                   API token (Bearer or "user:pass" for Basic)
+  --basic-auth <user:pass>      API token (Bearer or "user:pass" for Basic)
   -i, --page-id <id>            Existing Confluence page ID to update
 
 Optional:

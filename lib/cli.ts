@@ -1,14 +1,18 @@
-#!/usr/bin/env -S deno run -A
+// Program root: wires subcommands and parses args.
+
 import { Command } from "commander";
 import { makeConfluenceSingle } from "./confluence-single.ts";
 
-const program = new Command()
-  .name("authord")
-  .description("Authord CLI")
-  .enablePositionalOptions()
-  .showHelpAfterError();
+export async function main(argv: string[] = Deno.args) {
+  const program = new Command()
+    .name("authord")
+    .description("Authord CLI tools")
+    .addCommand(makeConfluenceSingle());
 
-program.addCommand(makeConfluenceSingle());
+  await program.parseAsync(argv, { from: "user" });
+}
 
-await program.parseAsync(Deno.args, { from: "user" });
-
+if (import.meta.main) {
+  // Run when invoked directly
+  await main();
+}

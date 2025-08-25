@@ -51,3 +51,8 @@ node_modules/
 # Build
 bin/
 !bin/.gitkeep
+
+*.png
+
+# Ignore Deno lock file
+deno.lock

@@ -1,0 +1,20 @@
+{
+  "imports": {
+    "commander": "npm:commander@latest",
+    "axios": "npm:axios@latest",
+    "fast-xml-parser": "npm:fast-xml-parser@latest",
+    "unified": "npm:unified@latest",
+    "remark-parse": "npm:remark-parse@latest",
+    "remark-gfm": "npm:remark-gfm@latest",
+    "remark-directive": "npm:remark-directive@latest",
+    "remark-rehype": "npm:remark-rehype@latest",
+    "rehype-raw": "npm:rehype-raw@latest",
+    "rehype-stringify": "npm:rehype-stringify@latest",
+    "form-data": "npm:form-data@latest",
+    "fs-extra": "npm:fs-extra@latest",
+    "github-slugger": "npm:github-slugger@latest",
+    "image-size": "npm:image-size@1",
+    "unist": "npm:unist",
+    "mdast": "npm:@types/mdast"
+  }
+}

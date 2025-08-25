@@ -1,256 +1,408 @@
-import axios from 'axios';
-import fs from 'node:fs/promises';
-import path from 'node:path';
-import FormData from 'form-data';
-import {
-  AttachmentResponse,
-  ConfluenceAttachment,
-  ConfluenceCfg,
-  PropertyData,
-  UploadResult,
-} from './types.ts';
-import { Buffer } from "node:buffer";
+// // Confluence Server/DC REST helpers (axios-based). No hard-coded URLs.
+// // All URLs derive from ConfluenceCfg.baseUrl. Errors are formatted via explainAxios().
 
-export const authHeaders = (cfg: ConfluenceCfg) => {
-  const tok = (cfg.apiToken || '').trim();
-  if (!tok) return { headers: {} };
-  // If token looks like "user:token" → use Basic
-  if (tok.includes(':')) {
-    const basic = Buffer.from(tok, 'utf8').toString('base64');
-    return { headers: { Authorization: `Basic ${basic}` } };
-  }
-  return { headers: { Authorization: `Bearer ${tok}` } };
-};
+// import axios, { type AxiosError, type AxiosInstance } from "axios";
+// import * as path from "node:path";
+// import { type ConfluenceCfg } from "../utils/types.ts";
+// import { Buffer } from "node:buffer";
 
-function explainAxios(err: any): string {
-  if (!axios.isAxiosError(err)) return String(err);
-  const { status, statusText, data, config } = err.response || {};
-  const method = (err.config?.method || 'GET').toUpperCase();
-  const url    = err.config?.url || config?.url || '';
-  let body: string;
-  try { body = typeof data === 'string' ? data : JSON.stringify(data); }
-  catch { body = '[unserializable error body]'; }
-  return `[${method}] ${url} → HTTP ${status ?? '?'} ${statusText ?? ''} — ${body ?? ''}`;
-}
+// export const PROP_KEY_EXPORT_HASH = "authord:exportHash";
+// export const PROP_KEY_ATTACH_HASHES = "authord:attachmentHashes"; // ⬅️ filename -> sha256 map
 
-/* ═════════════ Content CRUD & versioning ═════════════ */
+// export function authHeaders(cfg: ConfluenceCfg): Record<string, string> {
+//   const creds = `${cfg.basicAuth.username}:${cfg.basicAuth.password}`;
+//   const token = (typeof btoa === "function")
+//     ? btoa(creds)
+//     : Buffer.from(creds).toString("base64");
+//   return {
+//     "Authorization": `Basic ${token}`,
+//   };
+// }
 
+// export function explainAxios(err: unknown, context?: string): Error {
+//   // Prefer AxiosError formatting
+//   if (axios.isAxiosError(err)) {
+//     const ae = err as AxiosError<any>;
+//     const status = ae.response?.status;
+//     const statusText = ae.response?.statusText;
+//     const msg = (ae.response?.data?.message ||
+//       ae.response?.data?.errorMessage ||
+//       ae.message ||
+//       "Axios error");
+//     const more = status ? ` (HTTP ${status}${statusText ? " " + statusText : ""})` : "";
+//     return new Error(`${context ?? "HTTP error"}: ${msg}${more}`.trim());
+//   }
 
+//   // Fallback: some tests throw plain Error objects with a response.status
+//   const anyErr = err as any;
+//   const status = anyErr?.response?.status;
+//   const statusText = anyErr?.response?.statusText;
+//   const more = status ? ` (HTTP ${status}${statusText ? " " + statusText : ""})` : "";
 
-/** Fetch by pageId, include title & space so callers can keep current title. */
-export async function getPageWithVersion(cfg: ConfluenceCfg, pageId: string) {
-  try {
-    const url = `${cfg.baseUrl}/rest/api/content/${pageId}?expand=version,space`;
-    const { data } = await axios.get(url, authHeaders(cfg));
-    return {
-      id:          String(data.id),
-      nextVersion: (data.version?.number ?? 0) + 1,
-      title:       String(data.title ?? ''),
-      spaceKey:    String(data.space?.key ?? ''),
-    };
-  } catch (err) {
-    throw new Error(`getPageWithVersion failed: ${explainAxios(err)}`);
-  }
-}
+//   if (err instanceof Error) {
+//     return new Error(`${context ?? "HTTP error"}: ${err.message}${more}`.trim());
+//   }
+//   return new Error(`${context ?? "HTTP error"}: ${String(err)}${more}`.trim());
+// }
 
-/** Update page with storage (XHTML) body — requires next version number. */
-export async function putPageStorage(
-  cfg: ConfluenceCfg,
-  pageId: string,
-  title: string,
-  nextVersion: number,
-  storageHtml: string
-): Promise<void> {
-  try {
-    await axios.put(
-      `${cfg.baseUrl}/rest/api/content/${pageId}`,
-      {
-        id: pageId,
-        type: 'page',
-        title,
-        version: { number: nextVersion },
-        body: { storage: { value: storageHtml, representation: 'storage' } },
-      },
-      authHeaders(cfg)
-    );
-  } catch (err) {
-    throw new Error(`putPageStorage failed: ${explainAxios(err)}`);
-  }
-}
+// /** Create a preconfigured axios client for this Confluence instance. */
+// export function makeClient(cfg: ConfluenceCfg, ax?: AxiosInstance): AxiosInstance {
+//   if (ax) return ax;
+//   return axios.create({
+//     baseURL: cfg.baseUrl as unknown as string,
+//     headers: {
+//       ...authHeaders(cfg),
+//       "Accept": "application/json",
+//     },
+//   });
+// }
 
-/* ═════════════ Content-property management ═════════════ */
+// /** Get page, returning current metadata and the *next* version number to use. */
+// export async function getPageWithVersion(
+//   cfg: ConfluenceCfg,
+//   pageId: string,
+//   ax?: AxiosInstance,
+// ): Promise<{ id: string; title: string; spaceKey: string; nextVersion: number } | null> {
+//   const client = makeClient(cfg, ax);
+//   try {
+//     const res = await client.get(`/rest/api/content/${encodeURIComponent(pageId)}`, {
+//       params: { expand: "version,space" },
+//     });
+//     const body = res.data ?? {};
+//     const current = Number(body?.version?.number ?? 0) || 0;
+//     const title = String(body?.title ?? "");
+//     const spaceKey = String(body?.space?.key ?? "");
+//     return { id: String(body?.id ?? pageId), title, spaceKey, nextVersion: current + 1 };
+//   } catch (err) {
+//     if (axios.isAxiosError(err) && err.response?.status === 404) return null;
+//     // Some mocks throw plain Error with response.status
+//     if ((err as any)?.response?.status === 404) return null;
+//     throw explainAxios(err, "Failed to get page");
+//   }
+// }
 
-export async function getRemoteProperty(
-  cfg: ConfluenceCfg,
-  pageId: string
-): Promise<PropertyData | undefined> {
-  try {
-    const { data } = await axios.get(
-      `${cfg.baseUrl}/rest/api/content/${pageId}/property/exportHash`,
-      authHeaders(cfg)
-    );
-    return data as PropertyData;
-  } catch (err: any) {
-    if (axios.isAxiosError(err)) {
-      const code = err.response?.status;
-      // Treat classic "not found" as undefined — and be lenient on some DC setups that 400 this endpoint
-      if (code === 404) return undefined;
-      if (code === 400) {
-        // Some proxies/DC return 400 for unknown property keys — treat as missing to allow first publish
-        return undefined;
-      }
-    }
-    throw new Error(`getRemoteProperty failed: ${explainAxios(err)}`);
-  }
-}
+// /** Update page storage body; caller must supply the next version number. */
+// export async function putPageStorage(
+//   cfg: ConfluenceCfg,
+//   pageId: string,
+//   title: string,
+//   nextVersion: number,
+//   storageHtml: string,
+//   ax?: AxiosInstance,
+// ): Promise<{ id: string; version: number }> {
+//   const client = makeClient(cfg, ax);
+//   try {
+//     const res = await client.put(`/rest/api/content/${encodeURIComponent(pageId)}`, {
+//       id: pageId,
+//       type: "page",
+//       title,
+//       version: { number: nextVersion },
+//       body: {
+//         storage: {
+//           value: storageHtml,
+//           representation: "storage",
+//         },
+//       },
+//     }, {
+//       headers: { "Content-Type": "application/json" },
+//     });
+//     const data = res.data ?? {};
+//     return { id: String(data?.id ?? pageId), version: Number(data?.version?.number ?? nextVersion) };
+//   } catch (err) {
+//     throw explainAxios(err, "Failed to update page body");
+//   }
+// }
 
-export async function setRemoteHash(
-  cfg: ConfluenceCfg,
-  pageId: string,
-  hash: string
-): Promise<void> {
-  try {
-    const existing = await getRemoteProperty(cfg, pageId);
-    if (existing) {
-      await axios.put(
-        `${cfg.baseUrl}/rest/api/content/${pageId}/property/exportHash`,
-        { value: hash, version: { number: (existing.version?.number ?? 0) + 1 } },
-        authHeaders(cfg)
-      );
-    } else {
-      await axios.post(
-        `${cfg.baseUrl}/rest/api/content/${pageId}/property`,
-        { key: 'exportHash', value: hash },
-        authHeaders(cfg)
-      );
-    }
-  } catch (err) {
-    throw new Error(`setRemoteHash failed: ${explainAxios(err)}`);
-  }
-}
+// /** Read a content property; return null if 400/404 (missing or not set). */
+// export async function getRemoteProperty(
+//   cfg: ConfluenceCfg,
+//   pageId: string,
+//   key: string,
+//   ax?: AxiosInstance,
+// ): Promise<any | null> {
+//   const client = makeClient(cfg, ax);
+//   try {
+//     const res = await client.get(`/rest/api/content/${encodeURIComponent(pageId)}/property/${encodeURIComponent(key)}`);
+//     return res.data;
+//   } catch (err) {
+//     // Treat 400/404 as "missing" even if the thrown error is not a real AxiosError (e.g., in tests)
+//     const status = axios.isAxiosError(err) ? err.response?.status : (err as any)?.response?.status;
+//     if (status === 400 || status === 404) return null;
+//     throw explainAxios(err, `Failed to read content property "${key}"`);
+//   }
+// }
 
-/* ═════════════ Attachment helpers ═════════════ */
+// /** Convenience to fetch the export hash property string or null. */
+// export async function getRemoteHash(
+//   cfg: ConfluenceCfg,
+//   pageId: string,
+//   ax?: AxiosInstance,
+// ): Promise<string | null> {
+//   const data = await getRemoteProperty(cfg, pageId, PROP_KEY_EXPORT_HASH, ax);
+//   const value = data?.value ?? data?.results?.[0]?.value;
+//   return typeof value === "string" ? value : null;
+// }
 
-export async function listAttachments(
-  cfg: ConfluenceCfg,
-  pageId: string
-): Promise<Set<string>> {
-  const names = new Set<string>();
-  let url = `${cfg.baseUrl}/rest/api/content/${pageId}/child/attachment?limit=200`;
+// /** Set/replace the export hash content property. */
+// export async function setRemoteHash(
+//   cfg: ConfluenceCfg,
+//   pageId: string,
+//   hash: string,
+//   ax?: AxiosInstance,
+// ): Promise<void> {
+//   const client = makeClient(cfg, ax);
+//   // Try PUT (update) first; if 404, try POST (create)
+//   try {
+//     await client.put(`/rest/api/content/${encodeURIComponent(pageId)}/property/${encodeURIComponent(PROP_KEY_EXPORT_HASH)}`, {
+//       key: PROP_KEY_EXPORT_HASH,
+//       value: hash,
+//     }, { headers: { "Content-Type": "application/json" } });
+//     return;
+//   } catch (err) {
+//     const status = axios.isAxiosError(err) ? err.response?.status : (err as any)?.response?.status;
+//     if (status !== 404) {
+//       throw explainAxios(err, "Failed to update export hash property");
+//     }
+//   }
+//   try {
+//     await client.post(`/rest/api/content/${encodeURIComponent(pageId)}/property`, {
+//       key: PROP_KEY_EXPORT_HASH,
+//       value: hash,
+//     }, { headers: { "Content-Type": "application/json" } });
+//   } catch (err) {
+//     throw explainAxios(err, "Failed to create export hash property");
+//   }
+// }
 
-  while (url) {
-    try {
-      const { data } = await axios.get<AttachmentResponse>(url, authHeaders(cfg));
-      data.results.forEach(a => names.add(a.title));
-      url = data._links?.next ? cfg.baseUrl + data._links.next : '';
-    } catch (err) {
-      throw new Error(`listAttachments failed: ${explainAxios(err)}`);
-    }
-  }
-  return names;
-}
+// /** ---- Attachment hash manifest (filename -> sha256) ------------------ */
 
-/* helper – choose the correct identifier on DC */
-function pickAttachmentId(att: ConfluenceAttachment): string {
-  if (att.id) return att.id;
+// async function sha256HexOfBytes(bytes: Uint8Array): Promise<string> {
+//   const buf = await crypto.subtle.digest("SHA-256", bytes);
+//   const b = new Uint8Array(buf);
+//   return Array.from(b).map((x) => x.toString(16).padStart(2, "0")).join("");
+// }
 
-  const dl = att._links?.download;
-  if (dl) {
-    const m = dl.match(/[?&]fileId=([0-9a-f-]+)/i);
-    if (m) return m[1];
-  }
-  throw new Error(`No usable ID for attachment "${att.title}"`);
-}
+// export async function getAttachmentHashes(
+//   cfg: ConfluenceCfg,
+//   pageId: string,
+//   ax?: AxiosInstance,
+// ): Promise<Record<string, string>> {
+//   const data = await getRemoteProperty(cfg, pageId, PROP_KEY_ATTACH_HASHES, ax);
+//   const raw = data?.value ?? data?.results?.[0]?.value;
+//   if (!raw) return {};
+//   if (typeof raw === "string") {
+//     try { return JSON.parse(raw) as Record<string, string>; } catch { return {}; }
+//   }
+//   if (typeof raw === "object") return raw as Record<string, string>;
+//   return {};
+// }
 
-/** Upload a fresh image (PNG) — falls back to ensureAttachment on filename conflicts (4xx). */
-export async function uploadImages(
-  cfg: ConfluenceCfg,
-  pageId: string,
-  absPng: string
-): Promise<UploadResult> {
-  const fileName = path.basename(absPng);
-  const url      = `${cfg.baseUrl}/rest/api/content/${pageId}/child/attachment`;
+// export async function setAttachmentHashes(
+//   cfg: ConfluenceCfg,
+//   pageId: string,
+//   map: Record<string, string>,
+//   ax?: AxiosInstance,
+// ): Promise<void> {
+//   const client = makeClient(cfg, ax);
+//   // PUT update; if missing, POST create
+//   try {
+//     await client.put(`/rest/api/content/${encodeURIComponent(pageId)}/property/${encodeURIComponent(PROP_KEY_ATTACH_HASHES)}`, {
+//       key: PROP_KEY_ATTACH_HASHES,
+//       value: map,
+//     }, { headers: { "Content-Type": "application/json" } });
+//   } catch (err) {
+//     const status = axios.isAxiosError(err) ? err.response?.status : (err as any)?.response?.status;
+//     if (status !== 404) throw explainAxios(err, "Failed to update attachment hash manifest");
+//     await client.post(`/rest/api/content/${encodeURIComponent(pageId)}/property`, {
+//       key: PROP_KEY_ATTACH_HASHES,
+//       value: map,
+//     }, { headers: { "Content-Type": "application/json" } });
+//   }
+// }
 
-  try {
-    const pngBuf   = await fs.readFile(absPng);
-    const form = new FormData();
-    form.append('file', pngBuf, {
-      filename: fileName,
-      contentType: 'image/png',
-      knownLength: pngBuf.length,
-    });
+// /** List attachment filenames for the page (Set for quick lookup). */
+// export async function listAttachments(
+//   cfg: ConfluenceCfg,
+//   pageId: string,
+//   ax?: AxiosInstance,
+// ): Promise<Set<string>> {
+//   const client = makeClient(cfg, ax);
+//   try {
+//     const out = new Set<string>();
+//     let start = 0;
+//     const limit = 200;
+//     // Paginate conservatively
+//     // Confluence Server/DC: /child/attachment?limit=&start=
+//     // We'll fetch until fewer than limit are returned
+//     // eslint-disable-next-line no-constant-condition
+//     while (true) {
+//       const res = await client.get(`/rest/api/content/${encodeURIComponent(pageId)}/child/attachment`, {
+//         params: { limit, start },
+//       });
+//       const results: any[] = res.data?.results ?? [];
+//       for (const r of results) {
+//         const fname = String(r?.title ?? r?.metadata?.mediaType?.fileName ?? r?.metadata?.comment ?? "");
+//         if (fname) out.add(fname);
+//       }
+//       if (results.length < limit) break;
+//       start += limit;
+//     }
+//     return out;
+//   } catch (err) {
+//     throw explainAxios(err, "Failed to list attachments");
+//   }
+// }
 
-    const { data } = await axios.post(
-      url,
-      form,
-      {
-        ...authHeaders(cfg),
-        params: { expand: '_links' },
-        headers: {
-          ...form.getHeaders(),
-          'X-Atlassian-Token': 'no-check',
-          ...authHeaders(cfg).headers,
-        },
-        maxContentLength: Infinity,
-        maxBodyLength   : Infinity,
-        validateStatus  : s => s < 500,   // allow 4xx so we can fallback
-      }
-    );
+// /** Find an attachment by filename; return its id or null. */
+// export async function findAttachmentIdByName(
+//   cfg: ConfluenceCfg,
+//   pageId: string,
+//   filename: string,
+//   ax?: AxiosInstance,
+// ): Promise<string | null> {
+//   const client = makeClient(cfg, ax);
+//   try {
+//     const res = await client.get(`/rest/api/content/${encodeURIComponent(pageId)}/child/attachment`, {
+//       params: { filename, limit: 50 },
+//     });
+//     const results: any[] = res.data?.results ?? [];
+//     const item = results.find((x) => String(x?.title) === filename);
+//     return item?.id ? String(item.id) : null;
+//   } catch (err) {
+//     throw explainAxios(err, "Failed to query attachment by filename");
+//   }
+// }
 
-    // Duplicate filename? => fallback to ensureAttachment
-    if (!data.results?.length) {
-      return ensureAttachment(cfg, pageId, absPng);
-    }
+// /** Upload a PNG file as a new attachment. Returns filename. */
+// export async function uploadImage(
+//   cfg: ConfluenceCfg,
+//   pageId: string,
+//   absPngPath: string,
+//   ax?: AxiosInstance,
+// ): Promise<string> {
+//   const client = makeClient(cfg, ax);
+//   const FormData = (await import("form-data")).default as any;
+//   const fd = new FormData();
+//   const data = await Deno.readFile(absPngPath);
+//   const filename = path.basename(absPngPath);
+//   // Node FormData accepts Buffer
+//   // deno-lint-ignore no-explicit-any
+//   const buf: any = (typeof Buffer !== "undefined")
+//     ? Buffer.from(data)
+//     : data;
+//   fd.append("file", buf, {
+//     filename,
+//     contentType: "image/png",
+//   });
+//   try {
+//     await client.post(`/rest/api/content/${encodeURIComponent(pageId)}/child/attachment`, fd, {
+//       headers: {
+//         ...fd.getHeaders?.(),
+//         ...authHeaders(cfg),
+//         "X-Atlassian-Token": "no-check",
+//       },
+//       maxBodyLength: Infinity,
+//       maxContentLength: Infinity,
+//     });
+//     return filename;
+//   } catch (err) {
+//     throw explainAxios(err, `Failed to upload attachment "${filename}"`);
+//   }
+// }
 
-    const att = data.results[0] as ConfluenceAttachment;
-    return { file: fileName, mediaId: pickAttachmentId(att) };
-  } catch (err) {
-    // If direct upload failed for any reason, try to discover the latest mediaId
-    try {
-      return await ensureAttachment(cfg, pageId, absPng);
-    } catch (fallbackErr) {
-      throw new Error(`uploadImages failed: ${explainAxios(err)}; fallback failed: ${explainAxios(fallbackErr)}`);
-    }
-  }
-}
+// /** Update existing attachment data by id. */
+// export async function updateAttachmentData(
+//   cfg: ConfluenceCfg,
+//   pageId: string,
+//   attachmentId: string,
+//   absPngPath: string,
+//   ax?: AxiosInstance,
+// ): Promise<string> {
+//   const client = makeClient(cfg, ax);
+//   const FormData = (await import("form-data")).default as any;
+//   const fd = new FormData();
+//   const data = await Deno.readFile(absPngPath);
+//   const filename = path.basename(absPngPath);
+//   // deno-lint-ignore no-explicit-any
+//   const buf: any = (typeof Buffer !== "undefined")
+//     ? Buffer.from(data)
+//     : data;
+//   fd.append("file", buf, {
+//     filename,
+//     contentType: "image/png",
+//   });
+//   try {
+//     // Confluence Server/DC uses PUT to /child/attachment/{id}/data
+//     await client.put(`/rest/api/content/${encodeURIComponent(pageId)}/child/attachment/${encodeURIComponent(attachmentId)}/data`, fd, {
+//       headers: {
+//         ...fd.getHeaders?.(),
+//         ...authHeaders(cfg),
+//         "X-Atlassian-Token": "no-check",
+//       },
+//       maxBodyLength: Infinity,
+//       maxContentLength: Infinity,
+//     });
+//     return filename;
+//   } catch (err) {
+//     throw explainAxios(err, `Failed to update attachment "${filename}"`);
+//   }
+// }
 
-/** Ensure (or discover) attachment, returning its mediaId. */
-export async function ensureAttachment(
-  cfg: ConfluenceCfg,
-  pageId: string,
-  absPng: string
-): Promise<UploadResult> {
-  const fileName = path.basename(absPng);
-  let latestId   : string | undefined;
-  let latestVer  = -1;
-  let start      = 0;
-  const limit    = 100;
+// /**
+//  * Ensure the attachment with the given filename exists with up-to-date bytes.
+//  * Compares the local file's SHA-256 to a page-scoped manifest (content property).
+//  * If unchanged, no upload occurs. After any upload/update, the manifest is updated.
+//  */
+// export async function ensureAttachment(
+//   cfg: ConfluenceCfg,
+//   pageId: string,
+//   absPngPath: string,
+//   ax?: AxiosInstance,
+// ): Promise<string> {
+//   const filename = path.basename(absPngPath);
+//   const client = makeClient(cfg, ax);
 
-  while (true) {
-    try {
-      const url =
-        `${cfg.baseUrl}/rest/api/content/${pageId}/child/attachment` +
-        `?filename=${encodeURIComponent(fileName)}` +
-        `&expand=_links,version` +
-        `&start=${start}&limit=${limit}`;
+//   // Compute local hash
+//   const localBytes = await Deno.readFile(absPngPath);
+//   const localSha = await sha256HexOfBytes(localBytes);
 
-      const { data } = await axios.get<AttachmentResponse>(url, authHeaders(cfg));
+//   // Load/update manifest
+//   const manifest = await getAttachmentHashes(cfg, pageId, client);
+//   const prevSha = manifest[filename];
 
-      for (const att of data.results) {
-        const id = pickAttachmentId(att);
-        if (att.title === fileName && att.version.number > latestVer) {
-          latestVer = att.version.number;
-          latestId  = id;
-        }
-      }
+//   // If identical, skip network
+//   if (prevSha && prevSha === localSha) {
+//     return filename;
+//   }
 
-      if (!(data.size >= limit && data._links?.next)) break;
-      start += limit;
-    } catch (err) {
-      throw new Error(`ensureAttachment failed: ${explainAxios(err)}`);
-    }
-  }
+//   // Find by filename
+//   const existingId = await findAttachmentIdByName(cfg, pageId, filename, client);
 
-  if (!latestId) throw new Error(`No existing attachment found for ${fileName}`);
-  return { file: fileName, mediaId: latestId };
-}
+//   if (existingId) {
+//     await updateAttachmentData(cfg, pageId, existingId, absPngPath, client);
+//   } else {
+//     // Try create
+//     try {
+//       await uploadImage(cfg, pageId, absPngPath, client);
+//     } catch (err) {
+//       // If conflict, fall back to find & update
+//       const status = axios.isAxiosError(err) ? err.response?.status : (err as any)?.response?.status;
+//       if (status === 409 || status === 400) {
+//         const again = await findAttachmentIdByName(cfg, pageId, filename, client);
+//         if (again) {
+//           await updateAttachmentData(cfg, pageId, again, absPngPath, client);
+//         } else {
+//           throw err instanceof Error ? err : explainAxios(err, "ensureAttachment failed");
+//         }
+//       } else {
+//         throw err instanceof Error ? err : explainAxios(err, "ensureAttachment failed");
+//       }
+//     }
+//   }
+
+//   // Write new hash to manifest
+//   manifest[filename] = localSha;
+//   await setAttachmentHashes(cfg, pageId, manifest, client);
+
+//   return filename;
+// }

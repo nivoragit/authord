@@ -1,91 +1,55 @@
-export interface ValidationResult {
-    filePath: string;
-    errors: ValidationError[];
+// Cross-layer, small, dependency-free types & branded strings.
+
+/** Generic nominal brand helper */
+export type Brand<T, B extends string> = T & { readonly __brand: B };
+
+/** Branded URL and path types for safety */
+export type UrlString = Brand<string, "UrlString">;
+export type Path = Brand<string, "Path">;
+
+/** Confluence Storage XHTML (post-transform) */
+export type StorageXhtml = Brand<string, "StorageXhtml">;
+
+/** Confluence Page identifier */
+export type PageId = Brand<string, "PageId">;
+
+/** Basic auth credentials for Confluence/Data Center/Cloud */
+export interface BasicAuth {
+  readonly username: string;
+  readonly password: string;
 }
 
-export interface TreeNode {
-    file: string;             // markdown filename, e.g. "chapter1.md"
-    index: number;            // 0-based sibling position
-    parent: TreeNode | null;  // null for root pages
-    children: TreeNode[];
-}
-
-export interface TocConfig {
-    rootTitle: string;   // the instance-profile @name
-    startPage: string;   // the instance-profile @start-page
-    nodes: TreeNode[];// the toc-element tree
-}
-
-export interface TocElement {
-    topic: string;
-    title?: string;
-    children: TocElement[];
-    parent?: TocElement;
-}
-
-export interface InstanceProfile {
-    id: string;
-    name: string;
-    'start-page'?: string;
-    'toc-elements': TocElement[];
-}
-
-export interface WriterSideInstanceProfile extends InstanceProfile {
-    filePath: string;
-}
-
-export interface AuthordConfig {
-    topics?: { dir: string };
-    images?: { dir: string; version?: string; 'web-path'?: string };
-    instances?: InstanceProfile[];
-    [key: string]: any;
-}
-
+/** Connection/config for Confluence */
 export interface ConfluenceCfg {
-    baseUrl: string;  // https://confluence.mycorp.com
-    apiToken: string;  // Personal-Access-Token  (or password if you switch to basic auth)
+  readonly baseUrl: UrlString;
+  readonly basicAuth: BasicAuth;
 }
 
-export interface UploadResult { file: string; mediaId: string; }
-
-export interface ConfluenceAttachment {
-    id: string;
-    title: string;
-    version: AttachmentVersion;
-    _links?: { download?: string };
-}
-export interface AttachmentResponse {
-    results: ConfluenceAttachment[];
-    size: number;
-    _links?: { next?: string };
-}
-
-export interface PageHit { id: string; nextVersion: number; }
-export interface PropertyData { key: string; value: string; version: { number: number } }
-
-
+/**
+ * Options required to publish a single flattened document.
+ *
+ * rootDir  - project root directory
+ * md       - entry Markdown file to flatten (project-relative or absolute)
+ * images   - directory containing images/assets referenced by the doc
+ * baseUrl  - Confluence base URL
+ * basicAuth- credentials
+ * pageId   - target page identifier
+ * title    - optional override title for the resulting page
+ */
 export interface PublishSingleOptions {
-  /** Absolute or relative path to topics dir (resolved against rootDir if relative) */
-  md: string;
-  /** Absolute or relative path to images dir (resolved against rootDir if relative) */
-  images: string;
-
-  baseUrl: string;
-  basicAuth: string; // "user:pass"
-
-  /** Mandatory: ID of the Confluence page to update. */
-  pageId: string;
-
-  /** Optional: override page title; defaults to existing title. */
-  title?: string;
-
-  /** Optional: explicit project root directory; defaults to process.cwd(). */
-  rootDir?: string;
+  readonly rootDir: Path;
+  readonly md: Path;
+  readonly images: Path;
+  readonly baseUrl: UrlString;
+  readonly basicAuth: BasicAuth;
+  readonly pageId: PageId;
+  readonly title?: string;
 }
 
-interface AttachmentVersion { number: number; }
-interface ValidationError {
-    type: 'LINK' | 'IMAGE' | 'ANCHOR';
-    target: string;
-    message: string;
-}
+/* Small factory helpers to apply brands (lightweight, no validation here).
+   Adapters/validators can impose stricter checks where appropriate. */
+
+export const asUrl = (v: string): UrlString => v as UrlString;
+export const asPath = (v: string): Path => v as Path;
+export const asStorageXhtml = (v: string): StorageXhtml => v as StorageXhtml;
+export const asPageId = (v: string): PageId => v as PageId;
