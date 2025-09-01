@@ -1,9 +1,12 @@
-// Program root: wires subcommands and parses args.
+// Program root: wires subcommands and parses args (Deno-friendly).
+// Uses npm:commander so `deno run -A lib/cli.ts ...` works without import maps.
 
-import { Command } from "commander";
+import { Command } from "npm:commander@^12";
 import { makeConfluenceSingle } from "./confluence-single.ts";
 
 export async function main(argv: string[] = Deno.args) {
+  console.debug(`[authord:debug] cli.ts argv=${JSON.stringify(argv)}`);
+
   const program = new Command()
     .name("authord")
     .description("Authord CLI tools")
@@ -13,6 +16,5 @@ export async function main(argv: string[] = Deno.args) {
 }
 
 if (import.meta.main) {
-  // Run when invoked directly
   await main();
 }

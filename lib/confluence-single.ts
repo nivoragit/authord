@@ -2,7 +2,7 @@
 // Binds env/flags, wires adapters, and invokes the core use case.
 // No business logic here beyond option normalization and dependency wiring.
 
-import { Command } from "commander";
+import { Command } from "npm:commander@^12";
 import * as path from "node:path";
 import {
   asPageId,
@@ -26,22 +26,26 @@ import type { IFileSystem } from "./ports/ports.ts";
 // ---- Local FS adapter (only what's used by the use case)
 class DenoFileSystem implements IFileSystem {
   async readText(p: Path): Promise<string> {
-    return await Deno.readTextFile(p as unknown as string);
+    const pp = p as unknown as string;
+    console.debug(`[authord:debug] fs.readText -> ${pp}`);
+    return await Deno.readTextFile(pp);
   }
   async exists(p: Path): Promise<boolean> {
+    const pp = p as unknown as string;
     try {
-      await Deno.stat(p as unknown as string);
+      const st = await Deno.stat(pp);
+      const kind = st.isFile ? "file" : st.isDirectory ? "dir" : "other";
+      console.debug(`[authord:debug] fs.exists -> ${pp} (true, ${kind})`);
       return true;
     } catch {
+      console.debug(`[authord:debug] fs.exists -> ${pp} (false)`);
       return false;
     }
   }
   async glob(_pattern: string, _cwd?: Path): Promise<readonly Path[]> {
-    // Not needed by current use case; return empty.
     return [];
   }
   async list(_dir: Path): Promise<readonly Path[]> {
-    // Not needed by current use case; return empty.
     return [];
   }
 }
@@ -49,7 +53,6 @@ class DenoFileSystem implements IFileSystem {
 // ---- Helpers
 
 function parseBasicAuth(input: string): { username: string; password: string } {
-  // Accept "user:pass"
   const idx = input.indexOf(":");
   if (idx <= 0) {
     throw new Error(
@@ -61,41 +64,65 @@ function parseBasicAuth(input: string): { username: string; password: string } {
 
 /** Resolve a possibly-relative path under the project root. */
 function resolveUnderRoot(rootDir: string, p: string): string {
-  return path.isAbsolute(p) ? p : path.resolve(rootDir, p);
+  const out = path.isAbsolute(p) ? p : path.resolve(rootDir, p);
+  console.debug(`[authord:debug] resolveUnderRoot root=${rootDir} p=${p} -> ${out}`);
+  return out;
 }
 
 async function resolveEntrypointFile(mdArg: string): Promise<string> {
-  // If it's a file, return as-is. If it's a directory, try common names.
+  // If it's a file, return as-is. If it's a directory, try common names in likely base dirs.
+  console.debug(`[authord:debug] resolveEntrypointFile input=${mdArg}`);
   try {
     const st = await Deno.stat(mdArg);
-    if (st.isFile) return mdArg;
-  } catch {
-    // continue as dir lookup
-  }
-  const candidates = [
-    path.join(mdArg, "start.md"),
-    path.join(mdArg, "index.md"),
-    path.join(mdArg, "README.md"),
-  ];
-  for (const p of candidates) {
-    try {
-      const st = await Deno.stat(p);
-      if (st.isFile) return p;
-    } catch {
-      // try next
+    if (st.isFile) {
+      console.debug(`[authord:debug] resolveEntrypointFile -> existing file ${mdArg}`);
+      return mdArg;
     }
+  } catch {
+    /* continue as dir lookup */
   }
-  // Fallback: first .md under mdArg (shallow)
-  try {
-    for await (const entry of Deno.readDir(mdArg)) {
-      if (entry.isFile && entry.name.toLowerCase().endsWith(".md")) {
-        return path.join(mdArg, entry.name);
+
+  const candidateDirs = [
+    mdArg,                                // e.g., .../writerside
+    path.join(mdArg, "topics"),           // common Writerside content dir
+    path.join(mdArg, "docs"),
+    path.join(mdArg, "content"),
+  ];
+
+  const candidateFiles = ["start.md", "index.md", "home.md", "README.md"];
+
+  for (const dir of candidateDirs) {
+    for (const name of candidateFiles) {
+      const p = path.join(dir, name);
+      try {
+        const st = await Deno.stat(p);
+        if (st.isFile) {
+          console.debug(`[authord:debug] resolveEntrypointFile -> ${p}`);
+          return p;
+        }
+      } catch {
+        /* try next */
       }
     }
-  } catch {
-    // ignore
   }
+
+  // Fallback: first .md under the best-guess base dir (prefer topics/)
+  for (const dir of candidateDirs) {
+    try {
+      for await (const entry of Deno.readDir(dir)) {
+        if (entry.isFile && entry.name.toLowerCase().endsWith(".md")) {
+          const p = path.join(dir, entry.name);
+          console.debug(`[authord:debug] resolveEntrypointFile fallback -> ${p}`);
+          return p;
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
   // Give up; return what we got (will error later if missing)
+  console.debug(`[authord:debug] resolveEntrypointFile fallback -> ${mdArg} (unchanged)`);
   return mdArg;
 }
 
@@ -124,6 +151,7 @@ export async function runConfluenceSingle(
     baseUrl: opts.baseUrl,
     basicAuth: opts.basicAuth,
   };
+  console.debug(`[authord:debug] runConfluenceSingle cfg.baseUrl=${cfg.baseUrl}`);
   const concrete = deps ?? buildDefaultDeps(cfg);
   setPublishDeps(concrete);
   await publishSingle(opts);
@@ -165,20 +193,42 @@ Notes:
     )
     .action(async (dirArg: string, options: Record<string, string>) => {
       try {
+        console.debug(`[authord:debug] action(dirArg=${dirArg}) options=${JSON.stringify(options)}`);
+
         const rootDir = path.resolve(dirArg || ".");
+        console.debug(`[authord:debug] rootDir=${rootDir}`);
+
         const baseUrlStr = options.baseUrl || Deno.env.get("CONF_BASE_URL");
         const basicStr = options.basicAuth || Deno.env.get("CONF_BASIC_AUTH");
         const pageIdStr = options.pageId;
 
+        const hasCfg = await (async () => {
+          try {
+            const cfgPath = path.join(rootDir, "writerside.cfg");
+            const st = await Deno.stat(cfgPath);
+            const ok = st.isFile;
+            console.debug(`[authord:debug] probe writerside.cfg at ${cfgPath} -> ${ok}`);
+            return ok;
+          } catch {
+            console.debug(`[authord:debug] probe writerside.cfg at ${path.join(rootDir, "writerside.cfg")} -> false`);
+            return false;
+          }
+        })();
+
         // Resolve md/images relative to the provided [dir] root
         const mdArg = options.md || "topics";
-        const mdPath = await resolveEntrypointFile(
-          resolveUnderRoot(rootDir, mdArg),
-        );
+        const mdResolved = resolveUnderRoot(rootDir, mdArg);
+        const mdPath = await resolveEntrypointFile(mdResolved);
         const imagesDir = resolveUnderRoot(
           rootDir,
           options.images || Deno.env.get("AUTHORD_IMAGE_DIR") || "images",
         );
+
+        console.debug(`[authord:debug] baseUrl=${baseUrlStr}`);
+        console.debug(`[authord:debug] pageId=${pageIdStr}`);
+        console.debug(`[authord:debug] mdArg=${mdArg} mdResolved=${mdResolved} mdPath=${mdPath}`);
+        console.debug(`[authord:debug] imagesDir=${imagesDir}`);
+        console.debug(`[authord:debug] writerside.cfg exists? ${hasCfg}`);
 
         if (!baseUrlStr) throw new Error("Missing --base-url (or CONF_BASE_URL)");
         if (!basicStr) throw new Error("Missing --basic-auth (or CONF_BASIC_AUTH)");
@@ -195,6 +245,12 @@ Notes:
           pageId: asPageId(pageIdStr),
           title: options.title,
         };
+
+        console.debug(
+          `[authord:debug] psOpts=${JSON.stringify({
+            rootDir, md: mdPath, images: imagesDir, pageId: pageIdStr, title: options.title ?? null
+          })}`,
+        );
 
         await runConfluenceSingle(psOpts);
       } catch (err) {

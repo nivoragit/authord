@@ -1,6 +1,4 @@
-// Confluence Server/DC REST helpers (axios-based). No hard-coded URLs.
-// All URLs derive from ConfluenceCfg.baseUrl. Errors are formatted via explainAxios().
-
+// lib/adapters/confluence-rest.ts
 import axios, { type AxiosError, type AxiosInstance } from "axios";
 import * as path from "node:path";
 import { type ConfluenceCfg } from "../utils/types.ts";
@@ -14,9 +12,15 @@ export function authHeaders(cfg: ConfluenceCfg): Record<string, string> {
   const token = (typeof btoa === "function")
     ? btoa(creds)
     : Buffer.from(creds).toString("base64");
-  return {
-    "Authorization": `Basic ${token}`,
-  };
+  return { "Authorization": `Basic ${token}` };
+}
+
+// 👇 New helpers: build explicit headers for every request
+function jsonHeaders(cfg: ConfluenceCfg): Record<string, string> {
+  return { ...authHeaders(cfg), "Accept": "application/json" };
+}
+function jsonBodyHeaders(cfg: ConfluenceCfg): Record<string, string> {
+  return { ...jsonHeaders(cfg), "Content-Type": "application/json" };
 }
 
 export function explainAxios(err: unknown, context?: string): Error {
@@ -31,15 +35,11 @@ export function explainAxios(err: unknown, context?: string): Error {
     const more = status ? ` (HTTP ${status}${statusText ? " " + statusText : ""})` : "";
     return new Error(`${context ?? "HTTP error"}: ${msg}${more}`.trim());
   }
-
   const anyErr = err as any;
   const status = anyErr?.response?.status;
   const statusText = anyErr?.response?.statusText;
   const more = status ? ` (HTTP ${status}${statusText ? " " + statusText : ""})` : "";
-
-  if (err instanceof Error) {
-    return new Error(`${context ?? "HTTP error"}: ${err.message}${more}`.trim());
-  }
+  if (err instanceof Error) return new Error(`${context ?? "HTTP error"}: ${err.message}${more}`.trim());
   return new Error(`${context ?? "HTTP error"}: ${String(err)}${more}`.trim());
 }
 
@@ -48,10 +48,7 @@ export function makeClient(cfg: ConfluenceCfg, ax?: AxiosInstance): AxiosInstanc
   if (ax) return ax;
   return axios.create({
     baseURL: cfg.baseUrl as unknown as string,
-    headers: {
-      ...authHeaders(cfg),
-      "Accept": "application/json",
-    },
+    headers: jsonHeaders(cfg), // keep sensible defaults
   });
 }
 
@@ -65,6 +62,7 @@ export async function getPageWithVersion(
   try {
     const res = await client.get(`/rest/api/content/${encodeURIComponent(pageId)}`, {
       params: { expand: "version,space" },
+      headers: jsonHeaders(cfg), // 👈 explicit
     });
     const body = res.data ?? {};
     const current = Number(body?.version?.number ?? 0) || 0;
@@ -88,20 +86,16 @@ export async function putPageStorage(
   ax?: AxiosInstance,
 ): Promise<{ id: string; version: number }> {
   const client = makeClient(cfg, ax);
+  console.log(`[authord:debug] putPageStorage: ${storageHtml}`);
   try {
     const res = await client.put(`/rest/api/content/${encodeURIComponent(pageId)}`, {
       id: pageId,
       type: "page",
       title,
       version: { number: nextVersion },
-      body: {
-        storage: {
-          value: storageHtml,
-          representation: "storage",
-        },
-      },
+      body: { storage: { value: storageHtml, representation: "storage" } },
     }, {
-      headers: { "Content-Type": "application/json" },
+      headers: jsonBodyHeaders(cfg), // 👈 explicit
     });
     const data = res.data ?? {};
     return { id: String(data?.id ?? pageId), version: Number(data?.version?.number ?? nextVersion) };
@@ -119,7 +113,10 @@ export async function getRemoteProperty(
 ): Promise<any | null> {
   const client = makeClient(cfg, ax);
   try {
-    const res = await client.get(`/rest/api/content/${encodeURIComponent(pageId)}/property/${encodeURIComponent(key)}`);
+    const res = await client.get(
+      `/rest/api/content/${encodeURIComponent(pageId)}/property/${encodeURIComponent(key)}`,
+      { headers: jsonHeaders(cfg) }, // 👈 explicit
+    );
     return res.data;
   } catch (err) {
     const status = axios.isAxiosError(err) ? err.response?.status : (err as any)?.response?.status;
@@ -140,7 +137,6 @@ export async function getRemoteHash(
 }
 
 /** ---- DC-safe upsert for content properties (PUT requires id + version bump) ---- */
-
 async function upsertContentPropertyWithVersion(
   cfg: ConfluenceCfg,
   pageId: string,
@@ -149,11 +145,13 @@ async function upsertContentPropertyWithVersion(
   ax?: AxiosInstance,
 ): Promise<void> {
   const client = makeClient(cfg, ax);
+  console.log(`[authord:debug] upsertContentPropertyWithVersion:${value}`);
 
   // 1) Try read to get id + version
   try {
     const getRes = await client.get(
-      `/rest/api/content/${encodeURIComponent(pageId)}/property/${encodeURIComponent(key)}`
+      `/rest/api/content/${encodeURIComponent(pageId)}/property/${encodeURIComponent(key)}`,
+      { headers: jsonHeaders(cfg) }, // 👈 explicit
     );
     const prop = getRes.data ?? {};
     const propId = String(prop?.id ?? "");
@@ -168,14 +166,12 @@ async function upsertContentPropertyWithVersion(
     await client.put(
       `/rest/api/content/${encodeURIComponent(pageId)}/property/${encodeURIComponent(key)}`,
       body,
-      { headers: { "Content-Type": "application/json" } }
+      { headers: jsonBodyHeaders(cfg) }, // 👈 explicit
     );
     return;
   } catch (err) {
     const status = (axios.isAxiosError(err) ? err.response?.status : (err as any)?.response?.status) ?? 0;
-    if (status !== 404) {
-      throw explainAxios(err, `Failed to read content property "${key}"`);
-    }
+    if (status !== 404) throw explainAxios(err, `Failed to read content property "${key}"`);
   }
 
   // 2) Not found -> create
@@ -183,7 +179,7 @@ async function upsertContentPropertyWithVersion(
     await client.post(
       `/rest/api/content/${encodeURIComponent(pageId)}/property`,
       { key, value },
-      { headers: { "Content-Type": "application/json" } }
+      { headers: jsonBodyHeaders(cfg) }, // 👈 explicit
     );
   } catch (err) {
     throw explainAxios(err, `Failed to create content property "${key}"`);
@@ -201,7 +197,6 @@ export async function setRemoteHash(
 }
 
 /** ---- Attachment hash manifest (filename -> sha256) ------------------ */
-
 async function sha256HexOfBytes(bytes: Uint8Array): Promise<string> {
   const buf = await crypto.subtle.digest("SHA-256", bytes);
   const b = new Uint8Array(buf);
@@ -216,9 +211,7 @@ export async function getAttachmentHashes(
   const data = await getRemoteProperty(cfg, pageId, PROP_KEY_ATTACH_HASHES, ax);
   const raw = data?.value ?? data?.results?.[0]?.value;
   if (!raw) return {};
-  if (typeof raw === "string") {
-    try { return JSON.parse(raw) as Record<string, string>; } catch { return {}; }
-  }
+  if (typeof raw === "string") { try { return JSON.parse(raw) as Record<string, string>; } catch { return {}; } }
   if (typeof raw === "object") return raw as Record<string, string>;
   return {};
 }
@@ -243,11 +236,11 @@ export async function listAttachments(
     const out = new Set<string>();
     let start = 0;
     const limit = 200;
-    // eslint-disable-next-line no-constant-condition
     while (true) {
-      const res = await client.get(`/rest/api/content/${encodeURIComponent(pageId)}/child/attachment`, {
-        params: { limit, start },
-      });
+      const res = await client.get(
+        `/rest/api/content/${encodeURIComponent(pageId)}/child/attachment`,
+        { params: { limit, start }, headers: jsonHeaders(cfg) }, // 👈 explicit
+      );
       const results: any[] = res.data?.results ?? [];
       for (const r of results) {
         const fname = String(r?.title ?? r?.metadata?.mediaType?.fileName ?? r?.metadata?.comment ?? "");
@@ -271,9 +264,10 @@ export async function findAttachmentIdByName(
 ): Promise<string | null> {
   const client = makeClient(cfg, ax);
   try {
-    const res = await client.get(`/rest/api/content/${encodeURIComponent(pageId)}/child/attachment`, {
-      params: { filename, limit: 50 },
-    });
+    const res = await client.get(
+      `/rest/api/content/${encodeURIComponent(pageId)}/child/attachment`,
+      { params: { filename, limit: 50 }, headers: jsonHeaders(cfg) }, // 👈 explicit
+    );
     const results: any[] = res.data?.results ?? [];
     const item = results.find((x) => String(x?.title) === filename);
     return item?.id ? String(item.id) : null;
@@ -294,25 +288,23 @@ export async function uploadImage(
   const fd = new FormData();
   const data = await Deno.readFile(absPngPath);
   const filename = path.basename(absPngPath);
-  // Node FormData accepts Buffer
   // deno-lint-ignore no-explicit-any
-  const buf: any = (typeof Buffer !== "undefined")
-    ? Buffer.from(data)
-    : data;
-  fd.append("file", buf, {
-    filename,
-    contentType: "image/png",
-  });
+  const buf: any = (typeof Buffer !== "undefined") ? Buffer.from(data) : data;
+  fd.append("file", buf, { filename, contentType: "image/png" });
   try {
-    await client.post(`/rest/api/content/${encodeURIComponent(pageId)}/child/attachment`, fd, {
-      headers: {
-        ...fd.getHeaders?.(),
-        ...authHeaders(cfg),
-        "X-Atlassian-Token": "no-check",
+    await client.post(
+      `/rest/api/content/${encodeURIComponent(pageId)}/child/attachment`,
+      fd,
+      {
+        headers: {
+          ...fd.getHeaders?.(),
+          ...authHeaders(cfg),           // 👈 explicit
+          "X-Atlassian-Token": "no-check",
+        },
+        maxBodyLength: Infinity,
+        maxContentLength: Infinity,
       },
-      maxBodyLength: Infinity,
-      maxContentLength: Infinity,
-    });
+    );
     return filename;
   } catch (err) {
     throw explainAxios(err, `Failed to upload attachment "${filename}"`);
@@ -333,23 +325,22 @@ export async function updateAttachmentData(
   const data = await Deno.readFile(absPngPath);
   const filename = path.basename(absPngPath);
   // deno-lint-ignore no-explicit-any
-  const buf: any = (typeof Buffer !== "undefined")
-    ? Buffer.from(data)
-    : data;
-  fd.append("file", buf, {
-    filename,
-    contentType: "image/png",
-  });
+  const buf: any = (typeof Buffer !== "undefined") ? Buffer.from(data) : data;
+  fd.append("file", buf, { filename, contentType: "image/png" });
   try {
-    await client.put(`/rest/api/content/${encodeURIComponent(pageId)}/child/attachment/${encodeURIComponent(attachmentId)}/data`, fd, {
-      headers: {
-        ...fd.getHeaders?.(),
-        ...authHeaders(cfg),
-        "X-Atlassian-Token": "no-check",
+    await client.put(
+      `/rest/api/content/${encodeURIComponent(pageId)}/child/attachment/${encodeURIComponent(attachmentId)}/data`,
+      fd,
+      {
+        headers: {
+          ...fd.getHeaders?.(),
+          ...authHeaders(cfg),           // 👈 explicit
+          "X-Atlassian-Token": "no-check",
+        },
+        maxBodyLength: Infinity,
+        maxContentLength: Infinity,
       },
-      maxBodyLength: Infinity,
-      maxContentLength: Infinity,
-    });
+    );
     return filename;
   } catch (err) {
     throw explainAxios(err, `Failed to update attachment "${filename}"`);
@@ -370,26 +361,19 @@ export async function ensureAttachment(
   const filename = path.basename(absPngPath);
   const client = makeClient(cfg, ax);
 
-  // Compute local hash
   const localBytes = await Deno.readFile(absPngPath);
   const localSha = await sha256HexOfBytes(localBytes);
 
-  // Load/update manifest
   const manifest = await getAttachmentHashes(cfg, pageId, client);
   const prevSha = manifest[filename];
 
-  // If identical, skip network
-  if (prevSha && prevSha === localSha) {
-    return filename;
-  }
+  if (prevSha && prevSha === localSha) return filename;
 
-  // Find by filename
   const existingId = await findAttachmentIdByName(cfg, pageId, filename, client);
 
   if (existingId) {
     await updateAttachmentData(cfg, pageId, existingId, absPngPath, client);
   } else {
-    // Try create
     try {
       await uploadImage(cfg, pageId, absPngPath, client);
     } catch (err) {
@@ -407,7 +391,6 @@ export async function ensureAttachment(
     }
   }
 
-  // Write new hash to manifest
   manifest[filename] = localSha;
   await setAttachmentHashes(cfg, pageId, manifest, client);
 
