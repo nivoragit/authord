@@ -8,6 +8,8 @@ export function parseCfg(xml: string): IRConfig {
   const topicsDir = ihp?.topics?.dir ?? "topics";
   const imagesDir = ihp?.images?.dir ?? "images";
   const imagesWebPath = ihp?.images?.["web-path"];
+  const snippetsDir = ihp?.snippets?.src ?? "snippets";
+  
 
   const instRaw = ihp?.instance ?? [];
   const instances = (Array.isArray(instRaw) ? instRaw : [instRaw])
@@ -15,5 +17,5 @@ export function parseCfg(xml: string): IRConfig {
     .map((i: any) => ({ src: i.src, webPath: i["web-path"] }))
     .filter((i: any) => !!i.src);
 
-  return { topicsDir, imagesDir: { dir: imagesDir, webPath: imagesWebPath }, instances };
+  return { topicsDir,snippetsDir, imagesDir: { dir: imagesDir, webPath: imagesWebPath }, instances };
 }

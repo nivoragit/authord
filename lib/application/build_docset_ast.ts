@@ -27,6 +27,7 @@ export async function buildDocsetAst({ cfgPath, resource, macros = {}, fetchExte
   const cfgRaw = await resource.readText(cfgPath);
   const cfg = parseCfg(expandMacros(cfgRaw, macros));
 
+
   // 2) instances
   const instances: { ir: IRInstance; webPath?: string; srcAbs: string }[] = [];
   for (const inst of cfg.instances) {
@@ -34,14 +35,26 @@ export async function buildDocsetAst({ cfgPath, resource, macros = {}, fetchExte
     const txt = expandMacros(await resource.readText(abs), macros);
     instances.push({ ir: parseTree(txt), webPath: inst.webPath, srcAbs: abs });
   }
+ 
 
   // 3) gather content
-  const topics = new Set<string>();
-  const mds    = new Set<string>();
-  for (const { ir } of instances) walk(ir.toc, (n) => {
-    if (n.topic) topics.add(resource.resolve(cfgPath, n.topic));
-    if (n.file)  mds.add(resource.resolve(cfgPath, n.file));
-  });
+const topics = new Set<string>();
+const mds    = new Set<string>();
+const topicsBase = resource.resolve(cfgPath, cfg.topicsDir);
+for (const { ir } of instances) walk(ir.toc, (n) => {
+  // if (n.topic) topics.add(resource.resolve(topicsBase, n.topic));
+
+  if (n.topic) {
+    if (n.topic.toLowerCase().endsWith(".topic")) {
+      topics.add(resource.resolve(topicsBase, n.topic));
+    } else if (n.topic.toLowerCase().endsWith(".md")) {
+      mds.add(resource.resolve(topicsBase, n.topic));
+    }
+  }
+
+  // if (n.file)  mds.add(resource.resolve(topicsBase, n.file)); // todo
+});
+
 
   // 4) parse topics
   const topicMap = new Map<string, TopicPageNode>();
@@ -97,9 +110,14 @@ export async function buildDocsetAst({ cfgPath, resource, macros = {}, fetchExte
 
   // 7) code blocks
   if (fetchExternalCode) {
+    const snippetsBase = resource.resolve(cfgPath, cfg.snippetsDir);
     for (const [_path, page] of topicMap) {
-      await resolveCodeBlocks(page, async (owner, src) => {
-        const abs = resource.resolve(owner, src);
+      await resolveCodeBlocks(page, async (src) => {
+        if (/^https?:\/\//i.test(src)) {
+        console.debug(`[build] code block: skip external url ${src}`);
+        return "";
+       }
+        const abs = resource.resolve(snippetsBase, src);
         return await resource.readText(abs);
       });
     }

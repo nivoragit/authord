@@ -18,6 +18,7 @@ export function parseTree(xml: string): IRInstance {
     children: asArray(el["toc-element"]).map(parseToc),
   });
 
+
   const toc = asArray(root["toc-element"]).map(parseToc);
   return { id, name, startPage, isLibrary, toc };
 }

@@ -1,0 +1,52 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Deno CLI (debug) — prompt for basic auth",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/lib/cli.ts",
+      "runtimeExecutable": "/Users/madushika/.deno/bin/deno",
+      "runtimeArgs": ["run", "-A", "--inspect-wait"],
+      "args": [
+        "confluence-single",
+        "--base-url", "https://confluence.sumihiran.dev",
+        "--basic-auth", "${input:basicAuth}",
+        "--page-id", "163935",
+        "/Users/madushika/Downloads/docsmain2/docs"
+      ],
+      "attachSimplePort": 9229,
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "outputCapture": "std"
+    },
+    {
+      "name": "Deno CLI (debug) — env var basic auth",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/lib/cli.ts",
+      "runtimeExecutable": "/Users/madushika/.deno/bin/deno",
+      "runtimeArgs": ["run", "-A", "--inspect-wait"],
+      "args": [
+        "confluence-single",
+        "--base-url", "https://confluence.sumihiran.dev",
+        "--basic-auth", "${env:CONFLUENCE_BASIC_AUTH}",
+        "--page-id", "163935",
+        "/Users/madushika/Downloads/docsmain/docs"
+      ],
+      "attachSimplePort": 9229,
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "outputCapture": "std",
+      "envFile": "${workspaceFolder}/.env"
+    }
+  ],
+  "inputs": [
+    {
+      "id": "basicAuth",
+      "type": "promptString",
+      "description": "Enter basic auth as username:password",
+      "password": true
+    }
+  ]
+}

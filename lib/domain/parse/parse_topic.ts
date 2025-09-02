@@ -8,7 +8,10 @@ import { parseXml, asArray } from "../../adapters/xml_fxp.ts";
 export function parseTopic(xml: string, filePath: string): TopicPageNode {
   const doc = parseXml<any>(xml);
   const t = doc?.topic;
-  if (!t) throw new Error("Invalid .topic: missing <topic>");
+  if (!t) {
+    throw new Error("Invalid .topic: missing <topic>");
+  }
+    
 
   const id = t.id;
   const title = t.title;

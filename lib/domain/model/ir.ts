@@ -2,6 +2,7 @@
 
 export interface IRConfig {
   topicsDir: string;
+  snippetsDir: string;
   imagesDir: { dir: string; webPath?: string };
   instances: { src: string; webPath?: string }[];
 }
@@ -16,8 +17,8 @@ export interface IRInstance {
 }
 
 export interface IRTocItem {
-  title?: string;
+  title?: string;// todo
   topic?: string;
-  file?: string;
+  file?: string; // todo
   children: IRTocItem[];
 }

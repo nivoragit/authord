@@ -12,7 +12,6 @@ import {
   type PublishSingleOptions,
   type Path,
 } from "./utils/types.ts";
-import { OrderingResolver } from "./order/ordering-resolver.ts";
 import { WritersideMarkdownTransformer } from "./writerside-markdown-transformer.ts";
 import { MermaidRenderer } from "./adapters/diagram-renderer.ts";
 import {
@@ -22,6 +21,7 @@ import {
 } from "./adapters/confluence-repos.ts";
 import { publishSingle, setPublishDeps, type PublishDeps } from "./publish-single.ts";
 import type { IFileSystem } from "./ports/ports.ts";
+import { OrderingResolver } from "./order/ordering-resolver.ts";
 
 // ---- Local FS adapter (only what's used by the use case)
 class DenoFileSystem implements IFileSystem {

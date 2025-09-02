@@ -1,18 +1,27 @@
 // src/domain/resolve/resolve_code_blocks.ts (pure)
 import { TopicPageNode } from "../model/ast.ts";
 
-export type FetchCode = (ownerFile: string, src: string) => Promise<string>;
+export type FetchCode = (src: string) => Promise<string>;
 
 export async function resolveCodeBlocks(page: TopicPageNode, fetchCode: FetchCode) {
   async function walk(node: any) {
     if (!node) return;
-    if (node.type === "codeBlock" && node.data?.src) {
-      const content = await fetchCode(page.data.file, node.data.src);
+    if (node.type === "codeBlock" && node.data?.src &&  isCodeBlockFile(node.data.src)) { // todo
+      const content = await fetchCode(node.data.src);
       node.data.content = slice(content, node.data.includeLines);
     }
     if (node.children) for (const c of node.children) await walk(c);
   }
   await walk(page);
+}
+
+function isCodeBlockFile(file: string): boolean {
+  const lower = file.toLowerCase();
+  return (
+    lower.endsWith(".json") ||
+    lower.endsWith(".php") ||
+    lower.endsWith(".txt")
+  );
 }
 
 function slice(content: string, spec?: string) {

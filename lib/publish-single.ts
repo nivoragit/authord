@@ -143,10 +143,12 @@ function resourceFromFs(fs: IFileSystem, docRoot: string): DocsetResource {
       return false;
     },
     resolve(base: string, target: string) {
-      if (/^https?:\/\//i.test(target)) return target;
+      if (/^https?:\/\//i.test(target)) return target; // todo
       if (path.isAbsolute(target)) return target;
 
-      const root = path.dirname(base);
+      // Use the directory itself if `base` is a dir; otherwise use its dirname
+      const isDirLike = base.endsWith(path.sep) || !path.extname(base);
+      const root = isDirLike ? base : path.dirname(base);
       const primary = path.resolve(root, target);
 
       if (preferTopics(base, target)) {
@@ -173,7 +175,7 @@ async function tryRenderDocsetToStorage(cfgPath: string, deps: PublishDeps): Pro
   const docRoot = path.dirname(cfgPath);
   const resource = resourceFromFs(deps.fs, docRoot);
 
-  try {
+  // try {
     const docset = await buildDocsetAst({ cfgPath, resource, macros: {}, fetchExternalCode: true });
     console.debug(
       `[authord:debug] docset built (pages=${Array.isArray((docset as any)?.pages) ? (docset as any).pages.length : "?"})`,
@@ -186,14 +188,14 @@ async function tryRenderDocsetToStorage(cfgPath: string, deps: PublishDeps): Pro
 
     console.debug(`[authord:debug] rendered pages: ${results.length}`);
     return mergeStorageFragments(results.map(r => r.xml));
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`[authord] Writerside docset render failed, falling back to Markdown: ${msg}`);
-    if (err && typeof err === "object" && (err as any).stack) {
-      console.debug(`[authord:debug] docset error stack:\n${(err as any).stack}`);
-    }
-    return null; // trigger Markdown fallback path
-  }
+  // } catch (err) {
+  //   const msg = err instanceof Error ? err.message : String(err);
+  //   console.warn(`[authord] Writerside docset render failed, falling back to Markdown: ${msg}`); // todo
+  //   if (err && typeof err === "object" && (err as any).stack) {
+  //     console.debug(`[authord:debug] docset error stack:\n${(err as any).stack}`);
+  //   }
+  //   return null; // trigger Markdown fallback path
+  // }
 }
 
 /** Publish the single page according to the options, using injected ports. */
@@ -235,6 +237,7 @@ export async function publishSingle(options: PublishSingleOptions): Promise<void
   let cfgPathForDocset: string | null = null;
   if (mdEntrypoint.toLowerCase().endsWith(".cfg")) {
     cfgPathForDocset = mdEntrypoint;
+    console.log(`[authord] Using writerside.cfg docset path: ${cfgPathForDocset}`); // todo
   } else {
     const autoCfg = path.resolve(rootDir, "writerside.cfg");
     const hasAutoCfg = await fs.exists(asPath(autoCfg));
@@ -271,82 +274,82 @@ export async function publishSingle(options: PublishSingleOptions): Promise<void
     console.debug(`[authord:debug] cfgPathForDocset not set; falling back to markdown path`);
   }
 
-  // ---- FALLBACK: Markdown-concat path
-  const mdExists = await fs.exists(asPath(mdEntrypoint));
-  console.debug(`[authord:debug] exists(mdEntrypoint)=${mdExists}`);
-  if (!mdExists) throw new Error(`entry markdown not found: ${mdEntrypoint}`);
+  // // ---- FALLBACK: Markdown-concat path
+  // const mdExists = await fs.exists(asPath(mdEntrypoint));
+  // console.debug(`[authord:debug] exists(mdEntrypoint)=${mdExists}`);
+  // if (!mdExists) throw new Error(`entry markdown not found: ${mdEntrypoint}`);
 
-  // Determine MD base directory:
-  // - If mdEntrypoint is a file: use its dirname
-  // - If mdEntrypoint is a dir: prefer "<dir>/topics" if it exists, else the dir itself
-  let mdBaseDir =
-    path.extname(mdEntrypoint).toLowerCase() === ".md"
-      ? path.dirname(mdEntrypoint)
-      : mdEntrypoint;
+  // // Determine MD base directory:
+  // // - If mdEntrypoint is a file: use its dirname
+  // // - If mdEntrypoint is a dir: prefer "<dir>/topics" if it exists, else the dir itself
+  // let mdBaseDir =
+  //   path.extname(mdEntrypoint).toLowerCase() === ".md"
+  //     ? path.dirname(mdEntrypoint)
+  //     : mdEntrypoint;
 
-  const candidateTopics = path.join(mdBaseDir, "topics");
-  if (await fs.exists(asPath(candidateTopics))) {
-    console.debug(`[authord:debug] mdBaseDir adjusted to topics: ${candidateTopics}`);
-    mdBaseDir = candidateTopics;
-  } else {
-    console.debug(`[authord:debug] mdBaseDir=${mdBaseDir} (topics/ not found)`);
-    // Also consider "<rootDir>/topics" in case entry md is under root
-    const rootTopics = path.join(rootDir, "topics");
-    if (await fs.exists(asPath(rootTopics))) {
-      console.debug(`[authord:debug] mdBaseDir fallback to root topics: ${rootTopics}`);
-      mdBaseDir = rootTopics;
-    }
-  }
+  // const candidateTopics = path.join(mdBaseDir, "topics");
+  // if (await fs.exists(asPath(candidateTopics))) {
+  //   console.debug(`[authord:debug] mdBaseDir adjusted to topics: ${candidateTopics}`);
+  //   mdBaseDir = candidateTopics;
+  // } else {
+  //   console.debug(`[authord:debug] mdBaseDir=${mdBaseDir} (topics/ not found)`);
+  //   // Also consider "<rootDir>/topics" in case entry md is under root
+  //   const rootTopics = path.join(rootDir, "topics");
+  //   if (await fs.exists(asPath(rootTopics))) {
+  //     console.debug(`[authord:debug] mdBaseDir fallback to root topics: ${rootTopics}`);
+  //     mdBaseDir = rootTopics;
+  //   }
+  // }
 
-  console.debug(`[authord:debug] ordering.resolve base=${mdBaseDir}`);
-  const primaryOrder = await ordering.resolve(asPath(mdBaseDir));
-  console.debug(`[authord:debug] ordering returned=${JSON.stringify(primaryOrder)}`);
+  // console.debug(`[authord:debug] ordering.resolve base=${mdBaseDir}`);
+  // const primaryOrder = await ordering.resolve(asPath(mdBaseDir));
+  // console.debug(`[authord:debug] ordering returned=${JSON.stringify(primaryOrder)}`);
 
-  // Make all items absolute under mdBaseDir, then prioritize the explicit entrypoint file
-  const ordered = prioritizeEntrypoint(
-    path.resolve(mdEntrypoint),
-    (primaryOrder as readonly string[]).map((p) => path.resolve(mdBaseDir, p)),
-  );
+  // // Make all items absolute under mdBaseDir, then prioritize the explicit entrypoint file
+  // const ordered = prioritizeEntrypoint(
+  //   path.resolve(mdEntrypoint),
+  //   (primaryOrder as readonly string[]).map((p) => path.resolve(mdBaseDir, p)),
+  // );
 
-  // Filter to .md that exist (via fs) and log misses
-  const filtered: string[] = [];
-  for (const pth of ordered) {
-    const isMd = pth.toLowerCase().endsWith(".md");
-    const ex = isMd ? await fs.exists(asPath(pth)) : false;
-    console.debug(`[authord:debug] candidate ${pth} isMd=${isMd} exists=${ex}`);
-    if (isMd && ex) filtered.push(pth);
-  }
-  console.debug(`[authord:debug] ordered md files count=${filtered.length}`);
-  if (filtered.length === 0) throw new Error("No markdown files to publish after resolution.");
+  // // Filter to .md that exist (via fs) and log misses
+  // const filtered: string[] = [];
+  // for (const pth of ordered) {
+  //   const isMd = pth.toLowerCase().endsWith(".md");
+  //   const ex = isMd ? await fs.exists(asPath(pth)) : false;
+  //   console.debug(`[authord:debug] candidate ${pth} isMd=${isMd} exists=${ex}`);
+  //   if (isMd && ex) filtered.push(pth);
+  // }
+  // console.debug(`[authord:debug] ordered md files count=${filtered.length}`);
+  // if (filtered.length === 0) throw new Error("No markdown files to publish after resolution.");
 
-  const markdown = await readAndConcat(fs, filtered);
+  // const markdown = await readAndConcat(fs, filtered);
 
-  // Materialize Mermaid PNGs deterministically
-  {
-    const mermaidRegex = /```mermaid\s*\n([\s\S]*?)```/g;
-    let match: RegExpExecArray | null;
-    let mermaidIndex = 1;
-    while ((match = mermaidRegex.exec(markdown))) {
-      const def = (match[1] || "").trim();
-      console.debug(`[authord:debug] mermaid #${mermaidIndex}: ${def ? "render" : "skip-empty"}`);
-      if (!def) { mermaidIndex += 1; continue; }
-      try {
-        const outName = `mermaid-${mermaidIndex}.png`;
-        const outPath = path.resolve(imagesDir, outName);
-        await renderMermaidDefinitionToFile(def, outPath);
-      } catch (err) {
-        console.warn(`[authord] Failed to render Mermaid diagram #${mermaidIndex}: ${err instanceof Error ? err.message : err}`);
-      } finally {
-        mermaidIndex += 1;
-      }
-    }
-  }
+  // // Materialize Mermaid PNGs deterministically
+  // {
+  //   const mermaidRegex = /```mermaid\s*\n([\s\S]*?)```/g;
+  //   let match: RegExpExecArray | null;
+  //   let mermaidIndex = 1;
+  //   while ((match = mermaidRegex.exec(markdown))) {
+  //     const def = (match[1] || "").trim();
+  //     console.debug(`[authord:debug] mermaid #${mermaidIndex}: ${def ? "render" : "skip-empty"}`);
+  //     if (!def) { mermaidIndex += 1; continue; }
+  //     try {
+  //       const outName = `mermaid-${mermaidIndex}.png`;
+  //       const outPath = path.resolve(imagesDir, outName);
+  //       await renderMermaidDefinitionToFile(def, outPath);
+  //     } catch (err) {
+  //       console.warn(`[authord] Failed to render Mermaid diagram #${mermaidIndex}: ${err instanceof Error ? err.message : err}`);
+  //     } finally {
+  //       mermaidIndex += 1;
+  //     }
+  //   }
+  // }
 
-  const storage = await transformer.toStorage(markdown);
+  // const storage = await transformer.toStorage(markdown);
 
-  const newHash = await sha256Hex(String(storage));
-  const currentHash = await props.getExportHash(pageId);
-  console.debug(`[authord:debug] export-hash new=${newHash} current=${currentHash ?? "<none>"}`);
+  // const newHash = await sha256Hex(String(storage));
+  // const currentHash = await props.getExportHash(pageId);
+  // console.debug(`[authord:debug] export-hash new=${newHash} current=${currentHash ?? "<none>"}`);
 
   async function ensureRequiredAttachments(s: StorageXhtml): Promise<number> {
     const required = extractAttachmentFilenames(String(s));
@@ -374,14 +377,14 @@ export async function publishSingle(options: PublishSingleOptions): Promise<void
     return uploaded;
   }
 
-  if (currentHash === newHash) {
-    const healed = await ensureRequiredAttachments(storage);
-    console.info(`[authord] No content delta. Healed ${healed} missing attachment(s).`);
-    return;
-  }
+  // if (currentHash === newHash) {
+  //   const healed = await ensureRequiredAttachments(storage);
+  //   console.info(`[authord] No content delta. Healed ${healed} missing attachment(s).`);
+  //   return;
+  // }
 
-  await pageRepo.putStorageBody(pageId, storage, options.title);
-  const healed = await ensureRequiredAttachments(storage);
-  await props.setExportHash(pageId, makeExportHash(newHash));
-  console.info(`[authord] Published page ${String(pageId)} (attachments added: ${healed}).`);
+  // await pageRepo.putStorageBody(pageId, storage, options.title);
+  // const healed = await ensureRequiredAttachments(storage);
+  // await props.setExportHash(pageId, makeExportHash(newHash));
+  // console.info(`[authord] Published page ${String(pageId)} (attachments added: ${healed}).`);
 }

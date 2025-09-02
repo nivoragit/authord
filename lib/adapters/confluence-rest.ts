@@ -86,7 +86,6 @@ export async function putPageStorage(
   ax?: AxiosInstance,
 ): Promise<{ id: string; version: number }> {
   const client = makeClient(cfg, ax);
-  console.log(`[authord:debug] putPageStorage: ${storageHtml}`);
   try {
     const res = await client.put(`/rest/api/content/${encodeURIComponent(pageId)}`, {
       id: pageId,
@@ -145,7 +144,6 @@ async function upsertContentPropertyWithVersion(
   ax?: AxiosInstance,
 ): Promise<void> {
   const client = makeClient(cfg, ax);
-  console.log(`[authord:debug] upsertContentPropertyWithVersion:${value}`);
 
   // 1) Try read to get id + version
   try {
