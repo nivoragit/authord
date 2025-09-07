@@ -428,7 +428,7 @@ function buildTocMacro(macroId: string, maxLevel: number): HNode {
 /* ────────────── main plugin ────────────── */
 
 export default function rehypeConfluenceStorage(opts: RehypeConfluenceOptions = {}) {
-  const insertToc = opts.insertToc !== false;
+  const insertToc = opts.insertToc === true;
   const tocMacroId = opts.tocMacroId ?? "a854a720-dea6-4d0f-a0a2-e4591c07d85e";
   const tocMaxLevel = Number.isFinite(opts.tocMaxLevel) ? Number(opts.tocMaxLevel) : 3;
   const tocPosition: "top" | "after-first-h1" = opts.tocPosition ?? "top";

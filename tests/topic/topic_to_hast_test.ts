@@ -1,45 +1,102 @@
-import { assertEquals, assert } from "std/assert";
-import { TopicPageNode } from "../../lib/domain/model/ast.ts";
-import { topicToHast } from "../../lib/topic/topic_to_hast.ts";
+// deno-lint-ignore-file no-explicit-any
+import { assertStringIncludes } from "std/assert";
+import { unified } from "unified";
+import type { Element as XEl } from "xast";
+import rehypeStringify from "rehype-stringify";
+import rehypeConfluenceStorage from "../../lib/plugins/rehype-confluence-storage.ts";
+import { TopicXastToHast } from "../../lib/topic/topic_to_hast.ts";
 
+function xel(name: string, attrs: Record<string, unknown> = {}, children: any[] = []): XEl {
+  return { type: "element", name, attributes: attrs, children } as unknown as XEl;
+}
+function txt(v: string) {
+  return { type: "text", value: v } as any;
+}
 
-Deno.test("topicToHast: chapters, paragraphs, lists, tables, code-blocks", () => {
-  const topic: TopicPageNode = {
-    type: "topicPage",
-    data: { file: "/t.topic", id: "t", title: "T" },
-    children: [
-      { type: "chapter", data: { id: "c1", title: "Heading 1" }, children: [
-        { type: "paragraph", children: [{ type:"text", value:"Hello " }, { type:"link", data:{ href:"/x" }, children:[{ type:"text", value:"world"}] }] },
-        { type: "list", data: { ordered: false }, children: [
-          { type: "listItem", children: [{ type:"paragraph", children: [{ type:"text", value:"Item"}]}] }
-        ]},
-        { type: "table", children: [
-          { type: "tableRow", children: [
-            { type: "tableCell", children: [{ type:"paragraph", children:[{ type:"text", value:"A"}]}] },
-            { type: "tableCell", children: [{ type:"paragraph", children:[{ type:"text", value:"B"}]}] },
-          ]}
-        ]},
-        { type: "codeBlock", data: { lang:"xml", content:"<img src=\"a.png\"/>" }, children: [] },
-      ]},
-    ],
-  };
+async function renderHtml(hast: any) {
+  const proc = unified()
+    .use(rehypeConfluenceStorage)
+    .use(rehypeStringify, {
+      allowDangerousHtml: true,
+      closeSelfClosing: true,
+      tightSelfClosing: true,
+    });
 
-  const hast = topicToHast(topic);
-  assertEquals(hast.type, "root");
-  const h2 = (hast.children[0] as any);
-  assertEquals(h2.tagName, "h2");
-  assertEquals(h2.children[0].value, "Heading 1");
+  // run on AST then stringify
+  const transformed = await proc.run(hast as any);
+  return String(proc.stringify(transformed as any));
+}
 
-  const p = hast.children.find((n: any) => n.tagName === "p") as any;
-  assert(p);
-  assertEquals(p.children[0].value, "Hello ");
+Deno.test("headings: title->h1, section/title->h2", async () => {
+  const topic = xel("topic", {}, [
+    xel("title", {}, [txt("Root")]),
+    xel("section", {}, [
+      xel("title", {}, [txt("Child")]),
+      xel("p", {}, [txt("Body")]),
+    ]),
+  ]);
+  const html = await renderHtml(new TopicXastToHast().toHast(topic));
+  assertStringIncludes(html, "<h1>Root</h1>");
+  assertStringIncludes(html, "<h2>Child</h2>");
+  assertStringIncludes(html, "<p>Body</p>");
+});
 
-  const a = p.children[1];
-  assertEquals(a.tagName, "a");
-  assertEquals(a.properties.href, "/x");
-  assertEquals(a.children[0].value, "world");
+Deno.test("chapter: h{2+depth} fallback path", async () => {
+  const topic = xel("topic", {}, [
+    xel("chapter", { id: "c1" }, [
+      xel("title", {}, [txt("Chap 1")]),
+      xel("chapter", {}, [xel("title", {}, [txt("Chap 1.1")])]),
+    ]),
+  ]);
+  const html = await renderHtml(new TopicXastToHast().toHast(topic));
+  assertStringIncludes(html, `<h2 id="c1">Chap 1</h2>`);
+  assertStringIncludes(html, `<h3>Chap 1.1</h3>`);
+});
 
-  const code = hast.children.find((n: any) => n.tagName === "code-block") as any;
-  assertEquals(code.properties.lang, "xml");
-  assertEquals(code.children[0].value, "<img src=\"a.png\"/>");
+Deno.test("format: role-based then style", async () => {
+  const topic = xel("topic", {}, [
+    xel("p", {}, [
+      xel("format", { role: "strong" }, [txt("A")]),
+      txt(" "),
+      xel("format", { style: "color:red" }, [txt("B")]),
+    ]),
+  ]);
+  const html = await renderHtml(new TopicXastToHast().toHast(topic));
+  assertStringIncludes(html, "<strong>A</strong>");
+  assertStringIncludes(html, `<span style="color:red">B</span>`);
+});
+
+Deno.test("spotlight block", async () => {
+  const topic = xel("topic", {}, [xel("spotlight", {}, [xel("p", {}, [txt("Hi")])])]);
+  const html = await renderHtml(new TopicXastToHast().toHast(topic));
+  assertStringIncludes(html, `<div class="spotlight"><p>Hi</p>`);
+});
+
+Deno.test("code-block props passthrough", async () => {
+  const topic = xel("topic", {}, [
+    xel(
+      "code-block",
+      {
+        lang: "xml",
+        "collapsed-title": "More",
+        collapsible: "true",
+        "include-lines": "1-3",
+        src: "a.xml",
+      },
+      [txt("<![CDATA[<img src='x.png' width='10'/>]]>")],
+    ),
+  ]);
+  const html = await renderHtml(new TopicXastToHast().toHast(topic));
+  assertStringIncludes(html, `collapsed-title="More"`);
+  assertStringIncludes(html, `collapsible="true"`);
+  assertStringIncludes(html, `include-lines="1-3"`);
+  assertStringIncludes(html, `src="a.xml"`);
+  assertStringIncludes(html, "@@ATTACH|file=x.png|width=10@@");
+});
+
+Deno.test("images become ac:image downstream", async () => {
+  const topic = xel("topic", {}, [xel("p", {}, [xel("img", { src: "diagram.png", width: "200" }, [])])]);
+  const html = await renderHtml(new TopicXastToHast().toHast(topic));
+  assertStringIncludes(html, `ri:filename="diagram.png"`);
+  assertStringIncludes(html, `ac:width="200"`);
 });

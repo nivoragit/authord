@@ -239,12 +239,6 @@ export default function remarkConfluenceMedia(options: RemarkConfluenceMediaOpti
     imagesDir = IMAGE_DIR,
   } = options;
 
-  // IMPORTANT: only render Mermaid if the directory ALREADY EXISTS.
-  // Tests expect code blocks to remain when images dir is missing.
-  const IMAGES_DIR_EXISTS = (() => {
-    try { return fs.existsSync(imagesDir); } catch { return false; }
-  })();
-
   return async function transformer(tree: MdRoot) {
     const tasks: Promise<void>[] = [];
     let mermaidIndex = 0;
@@ -313,7 +307,14 @@ export default function remarkConfluenceMedia(options: RemarkConfluenceMediaOpti
       meta?: { alt?: string; width?: string; height?: string },
     ) => {
       if (emitMode === "html") {
-        const htmlNode: Html = { type: "html", value: `<confluence-image filename="${escapeAttr(file)}"${meta?.alt ? ` alt="${escapeAttr(meta.alt)}"` : ""}${meta?.width ? ` width="${escapeAttr(meta.width)}"` : ""}${meta?.height ? ` height="${escapeAttr(meta.height)}"` : ""} />` };
+        const htmlNode: Html = {
+          type: "html",
+          value:
+            `<confluence-image filename="${escapeAttr(file)}"` +
+            `${meta?.alt ? ` alt="${escapeAttr(meta.alt)}"` : ""}` +
+            `${meta?.width ? ` width="${escapeAttr(meta.width)}"` : ""}` +
+            `${meta?.height ? ` height="${escapeAttr(meta.height)}"` : ""} />`,
+        };
         (parent.children as RootContent[])[index] = htmlNode as unknown as RootContent;
       } else {
         const img: MdImage = { type: "image", url: file, alt: meta?.alt ?? "" };
@@ -325,9 +326,9 @@ export default function remarkConfluenceMedia(options: RemarkConfluenceMediaOpti
     function walk(node: UnistNode, parent?: UnistParent, index?: number) {
       if (!node) return;
 
-      // Mermaid: only render if directory exists
+      // Mermaid: render (or reuse) into imagesDir using hashed name
       if (isCode(node) && (node.lang || "").toLowerCase() === "mermaid" && parent && typeof index === "number") {
-        if (!(renderMermaid && IMAGES_DIR_EXISTS)) return; // leave code block as-is
+        if (!renderMermaid) return; // caller can disable if desired
 
         const code = (node.value || "").trim();
         mermaidIndex += 1;
@@ -350,9 +351,10 @@ export default function remarkConfluenceMedia(options: RemarkConfluenceMediaOpti
           if (!fileName) {
             const out = path.join(options.imagesDir ?? imagesDir, `${hashString("mermaid::" + code)}.png`);
             let ok = false;
-            if (fs.existsSync(out)) {
-              ok = await (isPngFileOK as (p: string) => boolean | Promise<boolean>)(out);
-            }
+            try {
+              ok = fs.existsSync(out) ? await (isPngFileOK as (p: string) => boolean | Promise<boolean>)(out) : false;
+            } catch { ok = false; }
+
             if (ok) {
               fileName = path.basename(out);
             } else {
@@ -395,8 +397,6 @@ export default function remarkConfluenceMedia(options: RemarkConfluenceMediaOpti
           const dims = applyDimsFromSiblings(para, i);
           const filename = basenameOf((child as MdImage).url);
           const alt = (child as MdImage).alt ?? undefined;
-
-          // Always keep Markdown images as Confluence HAST (your downstream plugin emits <ac:image>)
           toConfluenceImageHast(child as MdImage, filename, alt, dims.width, dims.height);
         }
       }

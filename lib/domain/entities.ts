@@ -1,6 +1,8 @@
 // Domain entities & value objects for the "authord" project.
 // Pure types with small factory helpers & guards. No external imports.
 
+// todo remove page
+
 /** Opaque brand for ExportHash */
 declare const EXPORT_HASH_BRAND: unique symbol;
 

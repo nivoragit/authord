@@ -12,8 +12,8 @@
         "confluence-single",
         "--base-url", "https://confluence.sumihiran.dev",
         "--basic-auth", "${input:basicAuth}",
-        "--page-id", "163935",
-        "/Users/madushika/Downloads/docsmain2/docs"
+        "--page-id", "163983",
+        "/Users/madushika/authord/sample/writerside"
       ],
       "attachSimplePort": 9229,
       "cwd": "${workspaceFolder}",

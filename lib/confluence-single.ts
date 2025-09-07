@@ -1,33 +1,21 @@
-// CLI subcommand: confluence-single
-// Binds env/flags, wires adapters, and invokes the core use case.
-// No business logic here beyond option normalization and dependency wiring.
+// deno-lint-ignore-file no-explicit-any
+// CLI subcommand: confluence-single (Commander wired to middleware)
+// -----------------------------------------------------------------------------
 
 import { Command } from "npm:commander@^12";
 import * as path from "node:path";
-import {
-  asPageId,
-  asPath,
-  asUrl,
-  type ConfluenceCfg,
-  type PublishSingleOptions,
-  type Path,
-} from "./utils/types.ts";
-import { WritersideMarkdownTransformer } from "./writerside-markdown-transformer.ts";
+import { ConfluencePageRepository, ConfluenceAttachmentRepository, ConfluencePropertyStore } from "./adapters/confluence-repos.ts";
 import { MermaidRenderer } from "./adapters/diagram-renderer.ts";
-import {
-  ConfluenceAttachmentRepository,
-  ConfluencePageRepository,
-  ConfluencePropertyStore,
-} from "./adapters/confluence-repos.ts";
-import { publishSingle, setPublishDeps, type PublishDeps } from "./publish-single.ts";
-import type { IFileSystem } from "./ports/ports.ts";
-import { OrderingResolver } from "./order/ordering-resolver.ts";
+import { IFileSystem } from "./ports/ports.ts";
+import { Path, ConfluenceCfg, asUrl, asPageId } from "./utils/types.ts";
+import { WritersideMarkdownTransformer } from "./writerside-markdown-transformer.ts";
+import { ConfluenceSinglePagePublisher } from "./confluenceSinglePagePublisher.ts";
 
-// ---- Local FS adapter (only what's used by the use case)
+/* ------------------------------ Local FS adapter ----------------------------- */
+
 class DenoFileSystem implements IFileSystem {
   async readText(p: Path): Promise<string> {
     const pp = p as unknown as string;
-    console.debug(`[authord:debug] fs.readText -> ${pp}`);
     return await Deno.readTextFile(pp);
   }
   async exists(p: Path): Promise<boolean> {
@@ -50,7 +38,7 @@ class DenoFileSystem implements IFileSystem {
   }
 }
 
-// ---- Helpers
+/* ---------------------------------- Helpers --------------------------------- */
 
 function parseBasicAuth(input: string): { username: string; password: string } {
   const idx = input.indexOf(":");
@@ -62,107 +50,56 @@ function parseBasicAuth(input: string): { username: string; password: string } {
   return { username: input.slice(0, idx), password: input.slice(idx + 1) };
 }
 
-/** Resolve a possibly-relative path under the project root. */
 function resolveUnderRoot(rootDir: string, p: string): string {
   const out = path.isAbsolute(p) ? p : path.resolve(rootDir, p);
   console.debug(`[authord:debug] resolveUnderRoot root=${rootDir} p=${p} -> ${out}`);
   return out;
 }
 
-async function resolveEntrypointFile(mdArg: string): Promise<string> {
-  // If it's a file, return as-is. If it's a directory, try common names in likely base dirs.
-  console.debug(`[authord:debug] resolveEntrypointFile input=${mdArg}`);
-  try {
-    const st = await Deno.stat(mdArg);
-    if (st.isFile) {
-      console.debug(`[authord:debug] resolveEntrypointFile -> existing file ${mdArg}`);
-      return mdArg;
-    }
-  } catch {
-    /* continue as dir lookup */
-  }
-
-  const candidateDirs = [
-    mdArg,                                // e.g., .../writerside
-    path.join(mdArg, "topics"),           // common Writerside content dir
-    path.join(mdArg, "docs"),
-    path.join(mdArg, "content"),
-  ];
-
-  const candidateFiles = ["start.md", "index.md", "home.md", "README.md"];
-
-  for (const dir of candidateDirs) {
-    for (const name of candidateFiles) {
-      const p = path.join(dir, name);
-      try {
-        const st = await Deno.stat(p);
-        if (st.isFile) {
-          console.debug(`[authord:debug] resolveEntrypointFile -> ${p}`);
-          return p;
-        }
-      } catch {
-        /* try next */
-      }
-    }
-  }
-
-  // Fallback: first .md under the best-guess base dir (prefer topics/)
-  for (const dir of candidateDirs) {
+async function detectCfg(rootDir: string, explicit?: string | null) {
+  if (explicit) {
+    const abs = resolveUnderRoot(rootDir, explicit);
     try {
-      for await (const entry of Deno.readDir(dir)) {
-        if (entry.isFile && entry.name.toLowerCase().endsWith(".md")) {
-          const p = path.join(dir, entry.name);
-          console.debug(`[authord:debug] resolveEntrypointFile fallback -> ${p}`);
-          return p;
-        }
-      }
-    } catch {
-      /* ignore */
-    }
+      const st = await Deno.stat(abs);
+      if (st.isFile && abs.toLowerCase().endsWith(".cfg")) return abs;
+    } catch { /* ignore */ }
   }
-
-  // Give up; return what we got (will error later if missing)
-  console.debug(`[authord:debug] resolveEntrypointFile fallback -> ${mdArg} (unchanged)`);
-  return mdArg;
+  const candidate = path.resolve(rootDir, "writerside.cfg");
+  try {
+    const st = await Deno.stat(candidate);
+    if (st.isFile) return candidate;
+  } catch { /* ignore */ }
+  return null;
 }
 
-/** Build concrete adapters (deps) from options. */
-function buildDefaultDeps(cfg: ConfluenceCfg): PublishDeps {
-  const fs = new DenoFileSystem();
-  const ordering = new OrderingResolver();
-  const transformer = new WritersideMarkdownTransformer();
-  // instantiate to trigger env-based defaults
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+/** Build ports and middleware from Confluence connection config. */
+function buildMiddleware(cfg: ConfluenceCfg, imagesDir: string) {
+  // Trigger Mermaid env defaults (width/height/theme) at startup
   const _renderer = new MermaidRenderer();
+
+  const fs = new DenoFileSystem();
+  const markdown = new WritersideMarkdownTransformer(imagesDir);
 
   const pageRepo = new ConfluencePageRepository(cfg);
   const attachRepo = new ConfluenceAttachmentRepository(cfg);
   const props = new ConfluencePropertyStore(cfg);
 
-  return { fs, ordering, transformer, pageRepo, attachRepo, props };
+  const middleware = new ConfluenceSinglePagePublisher({
+    fs,
+    markdown,
+    pageRepo,
+    attachRepo,
+    props,
+  });
+
+  return middleware;
 }
 
-/** Public helper so tests can run the action with mocked deps if desired. */
-export async function runConfluenceSingle(
-  opts: PublishSingleOptions,
-  deps?: PublishDeps,
-): Promise<void> {
-  const cfg: ConfluenceCfg = {
-    baseUrl: opts.baseUrl,
-    basicAuth: opts.basicAuth,
-  };
-  console.debug(`[authord:debug] runConfluenceSingle cfg.baseUrl=${cfg.baseUrl}`);
-  const concrete = deps ?? buildDefaultDeps(cfg);
-  setPublishDeps(concrete);
-  await publishSingle(opts);
-}
+/* ---------------------------------- Command --------------------------------- */
 
-/** Construct the commander Command for this subcommand. */
 export function makeConfluenceSingle(): Command {
   const cmd = new Command("confluence-single")
-    .description(
-      "Flatten a Writerside/Authord docs set and publish it to a single Confluence page.",
-    )
+    .description("Flatten and publish a Writerside/Authord docset to a single Confluence page.")
     .argument("[dir]", "Project root directory", ".")
     .requiredOption("--base-url <url>", "Confluence base URL (or set CONF_BASE_URL env)")
     .requiredOption(
@@ -171,8 +108,13 @@ export function makeConfluenceSingle(): Command {
     )
     .requiredOption("--page-id <id>", "Target Confluence page ID")
     .option("--title <title>", "Optional title override for the page")
-    .option("--md <fileOrDir>", "Entry Markdown file or directory, relative to [dir] (default: topics)", "topics")
+    .option("--cfg <file>", "Explicit writerside.cfg (relative to [dir])")
+    .option("--md <fileOrDir...>", "Markdown fallback: one or more *.md paths (relative to [dir])")
     .option("-i, --images <dir>", "Images directory, relative to [dir] (default: images)", "images")
+    .option("--no-toc", "Do not insert a Confluence TOC macro at the top")
+    .option("--heading-level <n>", "Section heading level for each page (1-6)", "2")
+    .option("--separators", "Insert <hr/> between sections")
+    .option("--allow-remote-xsd", "Allow remote XSD fetch during validation")
     .addHelpText(
       "after",
       `
@@ -186,85 +128,70 @@ Env variables:
   MMD_BG             Mermaid background color (css color)
   MMD_THEME          Mermaid theme (default, dark, forest, neutral)
   MMD_CONFIG         Mermaid CLI config file path
-
-Notes:
-  - Bearer tokens are not yet supported in this build; use basic auth (user:pass).
 `,
     )
-    .action(async (dirArg: string, options: Record<string, string>) => {
+    .action(async (dirArg: string, options: Record<string, string | string[] | boolean>) => {
       try {
-        console.debug(`[authord:debug] action(dirArg=${dirArg}) options=${JSON.stringify(options)}`);
-
         const rootDir = path.resolve(dirArg || ".");
-        console.debug(`[authord:debug] rootDir=${rootDir}`);
-
-        const baseUrlStr = options.baseUrl || Deno.env.get("CONF_BASE_URL");
-        const basicStr = options.basicAuth || Deno.env.get("CONF_BASIC_AUTH");
-        const pageIdStr = options.pageId;
-
-        const hasCfg = await (async () => {
-          try {
-            const cfgPath = path.join(rootDir, "writerside.cfg");
-            const st = await Deno.stat(cfgPath);
-            const ok = st.isFile;
-            console.debug(`[authord:debug] probe writerside.cfg at ${cfgPath} -> ${ok}`);
-            return ok;
-          } catch {
-            console.debug(`[authord:debug] probe writerside.cfg at ${path.join(rootDir, "writerside.cfg")} -> false`);
-            return false;
-          }
-        })();
-
-        // Resolve md/images relative to the provided [dir] root
-        const mdArg = options.md || "topics";
-        const mdResolved = resolveUnderRoot(rootDir, mdArg);
-        const mdPath = await resolveEntrypointFile(mdResolved);
-        const imagesDir = resolveUnderRoot(
-          rootDir,
-          options.images || Deno.env.get("AUTHORD_IMAGE_DIR") || "images",
-        );
-
-        console.debug(`[authord:debug] baseUrl=${baseUrlStr}`);
-        console.debug(`[authord:debug] pageId=${pageIdStr}`);
-        console.debug(`[authord:debug] mdArg=${mdArg} mdResolved=${mdResolved} mdPath=${mdPath}`);
-        console.debug(`[authord:debug] imagesDir=${imagesDir}`);
-        console.debug(`[authord:debug] writerside.cfg exists? ${hasCfg}`);
+        const baseUrlStr = String(options.baseUrl || Deno.env.get("CONF_BASE_URL") || "");
+        const basicStr = String(options.basicAuth || Deno.env.get("CONF_BASIC_AUTH") || "");
+        const pageIdStr = String(options.pageId || "");
+        const titleOpt = (options.title as string | undefined) ?? undefined;
 
         if (!baseUrlStr) throw new Error("Missing --base-url (or CONF_BASE_URL)");
         if (!basicStr) throw new Error("Missing --basic-auth (or CONF_BASIC_AUTH)");
         if (!pageIdStr) throw new Error("Missing --page-id");
+        const basicAuth = parseBasicAuth(basicStr);
 
-        const ba = parseBasicAuth(basicStr);
+        const cfgExplicit = (options.cfg as string | undefined) ?? null;
+        const cfgPath = await detectCfg(rootDir, cfgExplicit);
 
-        const psOpts: PublishSingleOptions = {
-          rootDir: asPath(rootDir),
-          md: asPath(mdPath),
-          images: asPath(imagesDir),
-          baseUrl: asUrl(baseUrlStr),
-          basicAuth: ba,
-          pageId: asPageId(pageIdStr),
-          title: options.title,
-        };
-
-        console.debug(
-          `[authord:debug] psOpts=${JSON.stringify({
-            rootDir, md: mdPath, images: imagesDir, pageId: pageIdStr, title: options.title ?? null
-          })}`,
+        // Images dir // todo set image dir by parsing config here
+        const imagesDir = resolveUnderRoot(
+          rootDir,
+          (options.images as string) || Deno.env.get("AUTHORD_IMAGE_DIR") || "images",
         );
 
-        await runConfluenceSingle(psOpts);
+        // Markdown fallback paths (array)
+        const mdOpt = options.md as string[] | string | undefined;
+        const mdList = Array.isArray(mdOpt)
+          ? mdOpt
+          : (typeof mdOpt === "string" ? [mdOpt] : []);
+        const mdPaths = mdList.map((p) => resolveUnderRoot(rootDir, p));
+
+        // Composer options
+        const insertToc = options.toc !== false;
+        const sectionHeadingLevel = Math.min(6, Math.max(1, Number(options.headingLevel ?? 2))) as 1|2|3|4|5|6;
+        const insertSeparators = Boolean(options.separators);
+        const allowRemoteSchemaFetch = Boolean(options.allowRemoteXsd);
+
+        const cfg: ConfluenceCfg = { baseUrl: asUrl(baseUrlStr), basicAuth };
+
+        const middleware = buildMiddleware(cfg, imagesDir);
+        const result = await middleware.execute({
+          rootDir,
+          cfgPath,
+          mdPaths,
+          imagesDir,
+          pageId: asPageId(pageIdStr),
+          title: titleOpt ?? "Documentation",
+          composer: { insertToc, sectionHeadingLevel, insertSeparators },
+          allowRemoteSchemaFetch,
+        });
+
+        const summary =
+          `Published to page ${pageIdStr} [mode=${result.mode}] ` +
+          `(updated=${result.updatedBody}, attachments=${result.uploadedAttachments}).`;
+        console.log(`[authord] ${summary}`);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error(`[authord] Error: ${msg}`);
-        // Do not hard exit (better for tests); indicate failure
         if (typeof (globalThis as any).process !== "undefined") {
           (globalThis as any).process.exitCode = 1;
         } else {
           try {
             (Deno as any).exitCode = 1;
-          } catch {
-            // ignore
-          }
+          } catch { /* ignore */ }
         }
       }
     });

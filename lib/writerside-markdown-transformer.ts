@@ -21,19 +21,16 @@ import type { IMarkdownTransformer } from "./ports/ports.ts";
 import { asStorageXhtml, type StorageXhtml } from "./utils/types.ts";
 
 export class WritersideMarkdownTransformer implements IMarkdownTransformer {
-  async toStorage(markdown: string): Promise<StorageXhtml> {
-    let mermaidCount = 0;
+  constructor(private imagesDir: string) {}
 
+  async toStorage(markdown: string): Promise<StorageXhtml> {
     const file = await unified()
       .use(remarkParse)
       .use(remarkGfm)
       .use(remarkDirective)
       .use(remarkConfluenceMedia, {
-        onMermaid: ({ index }) => {
-          // No rendering here; just a deterministic placeholder filename.
-          mermaidCount = index;
-          return { filename: `mermaid-${index}.png` };
-        },
+        imagesDir: this.imagesDir,
+        renderMermaid: true, 
       })
       .use(remarkRehype, { allowDangerousHtml: true })
       .use(rehypeRaw)
