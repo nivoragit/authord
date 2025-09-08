@@ -2,7 +2,7 @@
 import { assertStringIncludes } from "std/assert";
 import type { Element as XEl } from "xast";
 import type { IMarkdownTransformer } from "../../lib/ports/ports.ts";
-import { ConfluenceStorageRenderer } from "../../lib/application/confluence_storage_renderer.ts";
+import { ConfluenceStorageRenderer } from "../../lib/application/confluence-storage-renderer.ts";
 import { unified } from "unified";
 import rehypeStringify from "rehype-stringify";
 

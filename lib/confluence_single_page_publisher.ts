@@ -1,6 +1,6 @@
 // deno-lint-ignore-file no-explicit-any
 /**
- * ConfluenceSingleMiddleware
+ * ConfluenceSinglePagePublisher
  * ---------------------------------------------------------------------------
  * Purpose: Orchestrate the end-to-end flow for the "confluence-single" command:
  *   1) Resolve input (writerside.cfg preferred; markdown-only fallback).
@@ -16,25 +16,18 @@
 
 import * as path from "node:path";
 import { ConfluenceStorageRenderer } from "./application/confluence_storage_renderer.ts";
-import { DocsetAssembler, type FinalDocsetAst, type Resource } from "./application/docset_assembler.ts";
+import { AuthordAstAssembler, type AuthordAst, type Resource } from "./application/authord_ast_assembler.ts";
 import { SinglePageComposer, SinglePageComposerOptions } from "./application/single_page_composer.ts";
 import type { IFileSystem, IMarkdownTransformer, IPageRepository, IAttachmentRepository, IPropertyStore } from "./ports/ports.ts";
-import { ConfluenceSync } from "./sync/confluence-sync.ts";
+import { ConfluenceSync } from "./sync/confluence_sync.ts";
 import { PageId, Path as BrandPath } from "./utils/types.ts";
 import { loadMacrosFromVars } from "./domain/parse/vars_parser.ts";
 
 /* --------------------------- Option / Result types --------------------------- */
 
 export type ExecuteOptions = {
-  /** Project root. */
   rootDir: string;
-  /** If present and exists, prefer this writerside.cfg path. */
   cfgPath?: string | null;
-  /**
-   * Fallback markdown entrypoint: if no cfg, compose a single markdown page
-   * (or a small ordered set if you provide multiple md files).
-   * Accepts absolute or root-relative paths.
-   */
   mdPaths?: readonly string[];
   /** Local images directory containing referenced attachments. */
   imagesDir: string;
@@ -57,7 +50,7 @@ export type ExecuteResult = {
 
 /* ------------------------------- Dependencies -------------------------------- */
 
-export type MiddlewarePorts = {
+export type ConfluenceSinglePagePublisherPorts = {
   fs: IFileSystem;
   markdown: IMarkdownTransformer;
   pageRepo: IPageRepository;
@@ -65,28 +58,24 @@ export type MiddlewarePorts = {
   props: IPropertyStore;
 };
 
-
-/* --------------------------------- Middleware -------------------------------- */
+/* -------------------- ConfluenceSinglePagePublisher Class -------------------- */
 
 export class ConfluenceSinglePagePublisher {
-  readonly assembler: DocsetAssembler;
+  readonly assembler: AuthordAstAssembler;
   readonly renderer: ConfluenceStorageRenderer;
   readonly composer: SinglePageComposer;
   readonly sync: ConfluenceSync;
 
   constructor(
-    readonly ports: MiddlewarePorts,
+    readonly ports: ConfluenceSinglePagePublisherPorts,
   ) {
-    this.assembler = new DocsetAssembler();
-    this.renderer =
-      new ConfluenceStorageRenderer({
-        markdown: ports.markdown,
-        rehypeOpts: { insertToc: false },
-      });
-    this.composer =
-      new SinglePageComposer(this.renderer, ports.markdown);
-    this.sync =
-      new ConfluenceSync(ports.pageRepo, ports.attachRepo, ports.props);
+    this.assembler = new AuthordAstAssembler();
+    this.renderer = new ConfluenceStorageRenderer({
+      markdown: ports.markdown,
+      rehypeOpts: { insertToc: false },
+    });
+    this.composer = new SinglePageComposer(this.renderer, ports.markdown);
+    this.sync = new ConfluenceSync(ports.pageRepo, ports.attachRepo, ports.props);
   }
 
   /** Main entrypoint. Pure orchestration with clear log points. */
@@ -144,19 +133,14 @@ export class ConfluenceSinglePagePublisher {
   async #buildDocset(
     cfgPath: string,
     allowRemoteSchemaFetch: boolean,
-  ): Promise<FinalDocsetAst> {
+  ): Promise<AuthordAst> {
     const resource = this.#makeResource(this.ports.fs);
-
-
-    const macros = await loadMacrosFromVars(
-      resource,
-      cfgPath
-    );
+    const macros = await loadMacrosFromVars(resource, cfgPath);
 
     const docset = await this.assembler.build({
       cfgPath,
       resource,
-      macros, 
+      macros,
       fetchExternalCode: true,
       maxIncludeDepth: 20,
       allowRemoteSchemaFetch,
@@ -171,7 +155,7 @@ export class ConfluenceSinglePagePublisher {
   async #buildMarkdownFallbackDocset(
     rootDir: string,
     mdPathsInput: readonly string[],
-  ): Promise<FinalDocsetAst> {
+  ): Promise<AuthordAst> {
     // Resolve and filter to existing *.md files
     const candidates =
       mdPathsInput.length > 0
@@ -208,7 +192,7 @@ export class ConfluenceSinglePagePublisher {
       }),
     );
 
-    const docset: FinalDocsetAst = {
+    const docset: AuthordAst = {
       type: "docset",
       data: { cfg: { topicsDir: ".", instances: [] } as any },
       instances: [],
@@ -255,24 +239,15 @@ export class ConfluenceSinglePagePublisher {
 function guessContentType(name: string): string | undefined {
   const ext = name.toLowerCase().replace(/^.*\./, "");
   switch (ext) {
-    case "png":
-      return "image/png";
+    case "png": return "image/png";
     case "jpg":
-    case "jpeg":
-      return "image/jpeg";
-    case "gif":
-      return "image/gif";
-    case "svg":
-      return "image/svg+xml";
-    case "webp":
-      return "image/webp";
-    case "pdf":
-      return "application/pdf";
-    case "txt":
-      return "text/plain";
-    case "md":
-      return "text/markdown";
-    default:
-      return undefined;
+    case "jpeg": return "image/jpeg";
+    case "gif": return "image/gif";
+    case "svg": return "image/svg+xml";
+    case "webp": return "image/webp";
+    case "pdf": return "application/pdf";
+    case "txt": return "text/plain";
+    case "md": return "text/markdown";
+    default: return undefined;
   }
 }

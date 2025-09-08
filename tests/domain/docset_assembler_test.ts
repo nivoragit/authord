@@ -5,7 +5,7 @@ import {
   assertExists,
   assertMatch,
 } from "std/assert";
-import { DocsetAssembler } from "../../lib/application/docset_assembler.ts";
+import { AuthordAstAssembler } from "../../lib/application/authord-ast-assembler.ts";
 
 /* ───────────────────────── helpers: tiny xast builders ─────────────────── */
 
@@ -139,7 +139,7 @@ Deno.test("include: basic replacement injects referenced element's *content* (no
     el("toc-element", { topic: "A.topic" }),
   ]);
 
-  const assembler = new DocsetAssembler(
+  const assembler = new AuthordAstAssembler(
     new FakeCfgParser(fakeCfg) as any,
     new FakeInstanceProfileParser(instanceAst) as any,
     new FakeTopicParser(topicReg) as any,
@@ -198,7 +198,7 @@ Deno.test("include: nullable=true removes unresolved include; non-nullable leave
     el("toc-element", { topic: "A2.topic" }),
   ]);
 
-  const assembler = new DocsetAssembler(
+  const assembler = new AuthordAstAssembler(
     new FakeCfgParser(fakeCfg) as any,
     new FakeInstanceProfileParser(instanceAst) as any,
     new FakeTopicParser(topicReg) as any,
@@ -245,7 +245,7 @@ Deno.test("include: multi-pass (fixed-point) resolves nested include brought in 
   const fakeCfg = { topicsDir: "/root/topics/", instances: [{ src: "i.tree" }] };
   const instAst = el("instance-profile", {}, [el("toc-element", { topic: "A.topic" })]);
 
-  const assembler = new DocsetAssembler(
+  const assembler = new AuthordAstAssembler(
     new FakeCfgParser(fakeCfg) as any,
     new FakeInstanceProfileParser(instAst) as any,
     new FakeTopicParser(topicReg) as any,
@@ -287,7 +287,7 @@ Deno.test("include: depth guard stops after maxIncludeDepth", async () => {
   const fakeCfg = { topicsDir: "/root/topics/", instances: [{ src: "i.tree" }] };
   const instAst = el("instance-profile", {}, [el("toc-element", { topic: "A.topic" })]);
 
-  const assembler = new DocsetAssembler(
+  const assembler = new AuthordAstAssembler(
     new FakeCfgParser(fakeCfg) as any,
     new FakeInstanceProfileParser(instAst) as any,
     new FakeTopicParser(topicReg) as any,
@@ -332,7 +332,7 @@ Deno.test("code-block: injects text; preserves non-text children; removes existi
   const fakeCfg = { topicsDir: "/root/topics/", instances: [{ src: "i.tree" }] };
   const instAst = el("instance-profile", {}, [el("toc-element", { topic: "A.topic" })]);
 
-  const assembler = new DocsetAssembler(
+  const assembler = new AuthordAstAssembler(
     new FakeCfgParser(fakeCfg) as any,
     new FakeInstanceProfileParser(instAst) as any,
     new FakeTopicParser(topicReg) as any,
@@ -379,7 +379,7 @@ Deno.test("code-block: include-lines variants (single, open-range, comma list)",
   const fakeCfg = { topicsDir: "/root/topics/", instances: [{ src: "i.tree" }] };
   const instAst = el("instance-profile", {}, [el("toc-element", { topic: "A.topic" })]);
 
-  const assembler = new DocsetAssembler(
+  const assembler = new AuthordAstAssembler(
     new FakeCfgParser(fakeCfg) as any,
     new FakeInstanceProfileParser(instAst) as any,
     new FakeTopicParser(topicReg) as any,
@@ -412,7 +412,7 @@ Deno.test("markdown pages: are wrapped into <md-page> with content text", async 
     el("toc-element", { topic: "Readme.md" }),
   ]);
 
-  const assembler = new DocsetAssembler(
+  const assembler = new AuthordAstAssembler(
     new FakeCfgParser(fakeCfg) as any,
     new FakeInstanceProfileParser(instAst) as any,
     new FakeTopicParser(topicReg) as any, // no topics in this test
@@ -442,7 +442,7 @@ Deno.test("macros: applied to external code before injection", async () => {
   const fakeCfg = { topicsDir: "/root/topics/", instances: [{ src: "i.tree" }] };
   const instAst = el("instance-profile", {}, [el("toc-element", { topic: "A.topic" })]);
 
-  const assembler = new DocsetAssembler(
+  const assembler = new AuthordAstAssembler(
     new FakeCfgParser(fakeCfg) as any,
     new FakeInstanceProfileParser(instAst) as any,
     new FakeTopicParser(topicReg) as any,
@@ -487,7 +487,7 @@ Deno.test("preload include closure: loads referenced topics transitively only if
   const instAst = el("instance-profile", {}, [el("toc-element", { topic: "A.topic" })]);
 
   // Case 1: B exists => include resolves
-  const asm1 = new DocsetAssembler(
+  const asm1 = new AuthordAstAssembler(
     new FakeCfgParser(fakeCfg) as any,
     new FakeInstanceProfileParser(instAst) as any,
     new FakeTopicParser(topicReg) as any,
@@ -496,7 +496,7 @@ Deno.test("preload include closure: loads referenced topics transitively only if
   assertMatch(firstText(out1.pages[0].ast as any) ?? "", /ok/);
 
   // Case 2: B missing => include cannot resolve (no nullable) -> include remains
-  const asm2 = new DocsetAssembler(
+  const asm2 = new AuthordAstAssembler(
     new FakeCfgParser(fakeCfg) as any,
     new FakeInstanceProfileParser(instAst) as any,
     new FakeTopicParser(topicReg) as any,

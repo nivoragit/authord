@@ -3,7 +3,7 @@ import { assertStringIncludes } from "std/assert";
 import { unified } from "unified";
 import type { Element as XEl } from "xast";
 import rehypeStringify from "rehype-stringify";
-import rehypeConfluenceStorage from "../../lib/plugins/rehype-confluence-storage.ts";
+import rehypeConfluenceStorage from "../../lib/plugins/rehype_confluence_storage.ts";
 import { TopicXastToHast } from "../../lib/topic/topic_to_hast.ts";
 
 function xel(name: string, attrs: Record<string, unknown> = {}, children: any[] = []): XEl {

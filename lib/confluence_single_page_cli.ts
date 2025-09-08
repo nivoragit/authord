@@ -1,15 +1,15 @@
 // deno-lint-ignore-file no-explicit-any
-// CLI subcommand: confluence-single (Commander wired to middleware)
+// CLI subcommand: confluence-single (Commander wired to ConfluenceSinglePagePublisher)
 // -----------------------------------------------------------------------------
 
 import { Command } from "npm:commander@^12";
 import * as path from "node:path";
-import { ConfluencePageRepository, ConfluenceAttachmentRepository, ConfluencePropertyStore } from "./adapters/confluence-repos.ts";
-import { MermaidRenderer } from "./adapters/diagram-renderer.ts";
+import { MermaidRenderer } from "./adapters/diagram_renderer.ts";
 import { IFileSystem } from "./ports/ports.ts";
 import { Path, ConfluenceCfg, asUrl, asPageId } from "./utils/types.ts";
-import { WritersideMarkdownTransformer } from "./writerside-markdown-transformer.ts";
-import { ConfluenceSinglePagePublisher } from "./confluenceSinglePagePublisher.ts";
+import { WritersideMarkdownTransformer } from "./writerside_markdown_transformer.ts";
+import { ConfluenceSinglePagePublisher } from "./confluence_single_page_publisher.ts";
+import { ConfluenceAttachmentRepository, ConfluencePageRepository, ConfluencePropertyStore } from "./confluence_api/confluence_repos.ts";
 
 /* ------------------------------ Local FS adapter ----------------------------- */
 
@@ -97,7 +97,7 @@ function buildMiddleware(cfg: ConfluenceCfg, imagesDir: string) {
 
 /* ---------------------------------- Command --------------------------------- */
 
-export function makeConfluenceSingle(): Command {
+export function createConfluencePublishSinglePageCommand(): Command {
   const cmd = new Command("confluence-single")
     .description("Flatten and publish a Writerside/Authord docset to a single Confluence page.")
     .argument("[dir]", "Project root directory", ".")

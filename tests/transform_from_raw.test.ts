@@ -1,5 +1,5 @@
 // // writerside-transform-from-raw.test.ts
-import { WritersideMarkdownTransformer } from "../lib/writerside-markdown-transformer.ts";
+import { WritersideMarkdownTransformer } from "../lib/writerside_markdown_transformer.ts";
 
 // Tiny helper
 function expectIncludes(haystack: string, needles: string[], ctx = "output") {

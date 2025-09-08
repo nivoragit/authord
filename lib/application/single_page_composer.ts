@@ -18,12 +18,12 @@
  *    via an injected resolver so paths remain project-specific.
  */
 
-import type { ConfluencePage } from "../sync/confluence-sync.ts";
+import type { ConfluencePage } from "../sync/confluence_sync.ts";
 import type { Element as XEl } from "xast";
 import { ConfluenceStorageRenderer } from "./confluence_storage_renderer.ts";
 import type { IMarkdownTransformer } from "../ports/ports.ts";
 import { asStorageXhtml, type StorageXhtml, type Path } from "../utils/types.ts";
-import { FinalDocsetAst } from "./docset_assembler.ts";
+import { AuthordAst } from "./authord_ast_assembler.ts";
 
 export type AttachmentResolution = {
   filePath: Path;
@@ -58,7 +58,7 @@ export class SinglePageComposer {
   /**
    * Build a single ConfluencePage that contains all docset pages in order.
    */
-  async build(docset: FinalDocsetAst, opts: SinglePageComposerOptions): Promise<ConfluencePage> {
+  async build(docset: AuthordAst, opts: SinglePageComposerOptions): Promise<ConfluencePage> {
     const {
       title,
       insertToc = true,
@@ -124,7 +124,7 @@ export class SinglePageComposer {
 
 /* ───────────────────────────── ordering ───────────────────────────── */
 
-function orderPagesFromFirstInstance(docset: FinalDocsetAst): Array<{ path: string; ast: XEl }> {
+function orderPagesFromFirstInstance(docset: AuthordAst): Array<{ path: string; ast: XEl }> {
   // Prefer first instance profile's explicit order if available
   const firstInstance = docset.instances?.[0]?.ast;
   if (firstInstance) {

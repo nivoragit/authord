@@ -4,7 +4,7 @@ import {
   assert,
 } from "std/assert";
 
-import { ConfluenceSync, type ConfluencePage, type ConfluenceFolder } from "../../lib/sync/confluence-sync.ts";
+import { ConfluenceSync, type ConfluencePage, type ConfluenceFolder } from "../../lib/sync/confluence_sync.ts";
 import {
   asPageId,
   asStorageXhtml,

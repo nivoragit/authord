@@ -8,12 +8,12 @@
 
 import { unified } from "unified";
 import rehypeStringify from "rehype-stringify";
-import rehypeConfluenceStorage, { type RehypeConfluenceOptions } from "../plugins/rehype-confluence-storage.ts";
+import rehypeConfluenceStorage, { type RehypeConfluenceOptions } from "../plugins/rehype_confluence_storage.ts";
 import type { IMarkdownTransformer } from "../ports/ports.ts";
 import type { Element as XEl } from "xast";
 import { asStorageXhtml, type StorageXhtml } from "../utils/types.ts";
 import { TopicXastToHast, type HastRoot } from "../topic/topic_to_hast.ts";
-import { FinalDocsetAst } from "./docset_assembler.ts";
+import { AuthordAst } from "./authord_ast_assembler.ts";
 
 export type PageRender = { path: string; media: "storage-xhtml"; xhtml: StorageXhtml };
 
@@ -33,7 +33,7 @@ export class ConfluenceStorageRenderer {
   }
 
   /** Render the whole docset to Confluence Storage XHTML. */
-  async renderDocset(docset: FinalDocsetAst): Promise<PageRender[]> {
+  async renderDocset(docset: AuthordAst): Promise<PageRender[]> {
     const out: PageRender[] = [];
     for (const page of docset.pages) {
       if (page.kind === "markdown") {

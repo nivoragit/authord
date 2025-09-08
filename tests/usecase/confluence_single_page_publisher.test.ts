@@ -1,6 +1,6 @@
 // deno-lint-ignore-file no-explicit-any
 
-import { ConfluenceSinglePagePublisher } from "../../lib/confluenceSinglePagePublisher.ts";
+import { ConfluenceSinglePagePublisher } from "../../lib/confluence-single-page-publisher.ts";
 
 
 /* -----------------------------------------------------------------------------

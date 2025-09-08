@@ -57,14 +57,14 @@ export type BuildDocsetOptions = {
 };
 
 /** Final composite AST (xast everywhere). */
-export type FinalDocsetAst = {
+export type AuthordAst = {
   type: "docset";
   data: { cfg: IRConfig };
   instances: { path: string; ast: XEl }[];
   pages: { path: string; kind: "topic" | "markdown"; ast: XEl }[];
 };
 
-export class DocsetAssembler {
+export class AuthordAstAssembler {
   constructor(
     private readonly writersideCfgParser = new WritersideCfgParser(),
     private readonly instanceProfileParser = new InstanceProfileParser(),
@@ -78,7 +78,7 @@ export class DocsetAssembler {
     fetchExternalCode = false,
     maxIncludeDepth = 12,
     allowRemoteSchemaFetch = false,
-  }: BuildDocsetOptions): Promise<FinalDocsetAst> {
+  }: BuildDocsetOptions): Promise<AuthordAst> {
     // 1) Parse + validate cfg
     const cfgXmlRaw = await resource.readText(cfgFilePath);
     const cfg = await this.writersideCfgParser.parse(cfgXmlRaw);  // todo move this to top layer
@@ -154,7 +154,7 @@ export class DocsetAssembler {
     }
 
     // 8) Assemble
-    const pages: FinalDocsetAst["pages"][number][] = [];
+    const pages: AuthordAst["pages"][number][] = [];
     for (const [path, ast] of topicAstByPath) pages.push({ path, kind: "topic", ast });
     for (const [path, ast] of mdAstByPath) pages.push({ path, kind: "markdown", ast });
     return { type: "docset", data: { cfg }, instances: parsedInstances, pages };

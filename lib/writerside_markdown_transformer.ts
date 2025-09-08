@@ -14,8 +14,8 @@ import remarkRehype from "remark-rehype";
 import rehypeRaw from "rehype-raw";
 import rehypeStringify from "rehype-stringify";
 
-import remarkConfluenceMedia from "./plugins/remark-confluence-media.ts";
-import rehypeConfluenceStorage from "./plugins/rehype-confluence-storage.ts";
+import remarkConfluenceMedia from "./plugins/remark_confluence_media.ts";
+import rehypeConfluenceStorage from "./plugins/rehype_confluence_storage.ts";
 
 import type { IMarkdownTransformer } from "./ports/ports.ts";
 import { asStorageXhtml, type StorageXhtml } from "./utils/types.ts";

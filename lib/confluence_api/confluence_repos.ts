@@ -23,7 +23,7 @@ import {
   ensureAttachment as ensureAttachmentUtil,
   explainAxios,
   makeClient,
-} from "./confluence-rest.ts";
+} from "./confluence_rest.ts";
 import * as p from "node:path";
 import {
   type ExportHash,
