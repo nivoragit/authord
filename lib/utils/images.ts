@@ -9,9 +9,9 @@ export const PNG_MAGIC = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1
 export let IMAGE_DIR: string = Deno.env.get("AUTHORD_IMAGE_DIR") ?? "images";
 
 /** Update the global image directory (used by adapters/publishers). */
-export function setImageDir(dir: string) {
-  IMAGE_DIR = dir;
-}
+// export function setImageDir(dir: string) {
+//   IMAGE_DIR = dir;
+// }
 
 /** Simple deterministic hash (FNV-1a 32-bit) rendered as lowercase hex. */
 export function hashString(input: string): string {

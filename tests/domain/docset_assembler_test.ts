@@ -5,7 +5,8 @@ import {
   assertExists,
   assertMatch,
 } from "std/assert";
-import { AuthordAstAssembler } from "../../lib/application/authord-ast-assembler.ts";
+import { AuthordAstAssembler } from "../../lib/application/authord_ast_assembler.ts";
+
 
 /* ───────────────────────── helpers: tiny xast builders ─────────────────── */
 

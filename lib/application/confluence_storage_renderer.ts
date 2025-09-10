@@ -14,6 +14,7 @@ import type { Element as XEl } from "xast";
 import { asStorageXhtml, type StorageXhtml } from "../utils/types.ts";
 import { TopicXastToHast, type HastRoot } from "../topic/topic_to_hast.ts";
 import { AuthordAst } from "./authord_ast_assembler.ts";
+import rehypeConfluenceMedia from "../plugins/rehype-confluence-media.ts";
 
 export type PageRender = { path: string; media: "storage-xhtml"; xhtml: StorageXhtml };
 
@@ -27,7 +28,7 @@ export class ConfluenceStorageRenderer {
   private readonly topicToHast: TopicXastToHast;
   private readonly rehypeOpts: RehypeConfluenceOptions;
 
-  constructor(private readonly deps: ConfluenceStorageRendererDeps) {
+  constructor(private readonly deps: ConfluenceStorageRendererDeps, private imagesDir: string) {
     this.topicToHast = deps.topicToHast ?? new TopicXastToHast();
     this.rehypeOpts = deps.rehypeOpts ?? {};
   }
@@ -67,7 +68,15 @@ export class ConfluenceStorageRenderer {
   /** Topic XAST -> HAST transformed by rehype-confluence-storage (AST). */
   async toStorageAstForTopic(topic: XEl): Promise<HastRoot> {
     const initialHast = this.topicToHast.toHast(topic);
-    const proc = unified().use(rehypeConfluenceStorage, this.rehypeOpts);
+    const proc = unified()
+    // IMPORTANT: media first → creates <confluence-image> nodes
+    .use(rehypeConfluenceMedia, {
+      imagesDir: this.imagesDir,       // wherever your attachment sync picks up from
+      renderMermaid: true,
+      // htmlImgToAttach: false,   // leave false for topics unless you really need stubs
+    })
+    // Then map HAST → Confluence Storage AST
+    .use(rehypeConfluenceStorage, this.rehypeOpts);
     const transformed = await proc.run(initialHast as any);     // transform AST
     return transformed as HastRoot;
   }

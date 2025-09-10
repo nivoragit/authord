@@ -20,8 +20,10 @@ import { AuthordAstAssembler, type AuthordAst, type Resource } from "./applicati
 import { SinglePageComposer, SinglePageComposerOptions } from "./application/single_page_composer.ts";
 import type { IFileSystem, IMarkdownTransformer, IPageRepository, IAttachmentRepository, IPropertyStore } from "./ports/ports.ts";
 import { ConfluenceSync } from "./sync/confluence_sync.ts";
-import { PageId, Path as BrandPath } from "./utils/types.ts";
+import { PageId, Path as BrandPath, Path, ConfluenceCfg } from "./utils/types.ts";
 import { loadMacrosFromVars } from "./domain/parse/vars_parser.ts";
+import { WritersideMarkdownTransformer } from "./writerside_markdown_transformer.ts";
+import { ConfluenceAttachmentRepository, ConfluencePageRepository, ConfluencePropertyStore } from "./confluence_api/confluence_repos.ts";
 
 /* --------------------------- Option / Result types --------------------------- */
 
@@ -58,24 +60,61 @@ export type ConfluenceSinglePagePublisherPorts = {
   props: IPropertyStore;
 };
 
+/* ------------------------------ Local FS adapter ----------------------------- */
+
+class DenoFileSystem implements IFileSystem {
+  async readText(p: Path): Promise<string> {
+    const pp = p as unknown as string;
+    return await Deno.readTextFile(pp);
+  }
+  async exists(p: Path): Promise<boolean> {
+    const pp = p as unknown as string;
+    try {
+      const st = await Deno.stat(pp);
+      const kind = st.isFile ? "file" : st.isDirectory ? "dir" : "other";
+      // console.debug(`[authord:debug] fs.exists -> ${pp} (true, ${kind})`);
+      return true;
+    } catch {
+      // console.debug(`[authord:debug] fs.exists -> ${pp} (false)`);
+      return false;
+    }
+  }
+  async glob(_pattern: string, _cwd?: Path): Promise<readonly Path[]> {
+    return [];
+  }
+  async list(_dir: Path): Promise<readonly Path[]> {
+    return [];
+  }
+}
+
 /* -------------------- ConfluenceSinglePagePublisher Class -------------------- */
 
 export class ConfluenceSinglePagePublisher {
-  readonly assembler: AuthordAstAssembler;
-  readonly renderer: ConfluenceStorageRenderer;
-  readonly composer: SinglePageComposer;
-  readonly sync: ConfluenceSync;
-
-  constructor(
+  private constructor(
     readonly ports: ConfluenceSinglePagePublisherPorts,
-  ) {
-    this.assembler = new AuthordAstAssembler();
-    this.renderer = new ConfluenceStorageRenderer({
-      markdown: ports.markdown,
+    readonly assembler: AuthordAstAssembler,
+    readonly renderer: ConfluenceStorageRenderer,
+    readonly composer: SinglePageComposer,
+    readonly sync: ConfluenceSync,
+  ) {}
+
+  static build(cfg: ConfluenceCfg, imagesDir: string) {
+    const fs = new DenoFileSystem();
+    const markdown = new WritersideMarkdownTransformer(imagesDir);
+  
+    const pageRepo = new ConfluencePageRepository(cfg);
+    const attachRepo = new ConfluenceAttachmentRepository(cfg);
+    const props = new ConfluencePropertyStore(cfg);
+    const assembler = new AuthordAstAssembler();
+    const renderer = new ConfluenceStorageRenderer({
+      markdown: markdown,
       rehypeOpts: { insertToc: false },
-    });
-    this.composer = new SinglePageComposer(this.renderer, ports.markdown);
-    this.sync = new ConfluenceSync(ports.pageRepo, ports.attachRepo, ports.props);
+    }, imagesDir);
+    const composer = new SinglePageComposer(renderer, markdown);
+    const sync = new ConfluenceSync(pageRepo, attachRepo, props);
+    const ports = {fs, markdown, pageRepo, attachRepo, props};
+  
+    return new ConfluenceSinglePagePublisher(ports,assembler, renderer, composer, sync);
   }
 
   /** Main entrypoint. Pure orchestration with clear log points. */
@@ -83,7 +122,6 @@ export class ConfluenceSinglePagePublisher {
     const {
       rootDir,
       cfgPath,
-      mdPaths = [],
       imagesDir,
       pageId,
       title,
@@ -99,10 +137,7 @@ export class ConfluenceSinglePagePublisher {
       : "markdown-fallback";
 
     // 2) Build FinalDocsetAst
-    const docset =
-      mode === "writerside-docset"
-        ? await this.#buildDocset(preferredCfg, allowRemoteSchemaFetch)
-        : await this.#buildMarkdownFallbackDocset(rootDir, mdPaths);
+    const docset = await this.#buildDocset(preferredCfg, allowRemoteSchemaFetch);
 
     // 3) Compose single page
     const page = await this.composer.build(docset, {
@@ -137,7 +172,7 @@ export class ConfluenceSinglePagePublisher {
     const resource = this.#makeResource(this.ports.fs);
     const macros = await loadMacrosFromVars(resource, cfgPath);
 
-    const docset = await this.assembler.build({
+    return await this.assembler.build({
       cfgPath,
       resource,
       macros,
@@ -145,60 +180,7 @@ export class ConfluenceSinglePagePublisher {
       maxIncludeDepth: 20,
       allowRemoteSchemaFetch,
     });
-    return docset;
-  }
-
-  /**
-   * Extremely small synthetic docset for markdown fallback.
-   * Uses only the composer + markdown transformer pipeline.
-   */
-  async #buildMarkdownFallbackDocset(
-    rootDir: string,
-    mdPathsInput: readonly string[],
-  ): Promise<AuthordAst> {
-    // Resolve and filter to existing *.md files
-    const candidates =
-      mdPathsInput.length > 0
-        ? mdPathsInput
-        : [path.resolve(rootDir, "topics", "README.md")];
-
-    const mdPaths: string[] = [];
-    for (const p of candidates) {
-      const abs = path.isAbsolute(p) ? p : path.resolve(rootDir, p);
-      if (
-        abs.toLowerCase().endsWith(".md") &&
-        await this.ports.fs.exists(this.asBrand(abs))
-      ) {
-        mdPaths.push(abs);
-      }
-    }
-    if (mdPaths.length === 0) {
-      throw new Error(
-        "No writerside.cfg found and no markdown files available for fallback.",
-      );
-    }
-
-    // FinalDocsetAst with only md pages; instances empty => composer uses docset order
-    const pages = await Promise.all(
-      mdPaths.map(async (p) => {
-        const text = await this.ports.fs.readText(this.asBrand(p));
-        const mdAst = {
-          type: "element",
-          name: "md-page",
-          attributes: { src: p },
-          children: [{ type: "text", value: text }],
-        } as any;
-        return { path: p, kind: "markdown" as const, ast: mdAst };
-      }),
-    );
-
-    const docset: AuthordAst = {
-      type: "docset",
-      data: { cfg: { topicsDir: ".", instances: [] } as any },
-      instances: [],
-      pages,
-    };
-    return docset;
+    
   }
 
   /* --------------------------------- Helpers --------------------------------- */

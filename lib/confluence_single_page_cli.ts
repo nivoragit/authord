@@ -4,39 +4,8 @@
 
 import { Command } from "npm:commander@^12";
 import * as path from "node:path";
-import { MermaidRenderer } from "./adapters/diagram_renderer.ts";
-import { IFileSystem } from "./ports/ports.ts";
-import { Path, ConfluenceCfg, asUrl, asPageId } from "./utils/types.ts";
-import { WritersideMarkdownTransformer } from "./writerside_markdown_transformer.ts";
+import {  ConfluenceCfg, asUrl, asPageId } from "./utils/types.ts";
 import { ConfluenceSinglePagePublisher } from "./confluence_single_page_publisher.ts";
-import { ConfluenceAttachmentRepository, ConfluencePageRepository, ConfluencePropertyStore } from "./confluence_api/confluence_repos.ts";
-
-/* ------------------------------ Local FS adapter ----------------------------- */
-
-class DenoFileSystem implements IFileSystem {
-  async readText(p: Path): Promise<string> {
-    const pp = p as unknown as string;
-    return await Deno.readTextFile(pp);
-  }
-  async exists(p: Path): Promise<boolean> {
-    const pp = p as unknown as string;
-    try {
-      const st = await Deno.stat(pp);
-      const kind = st.isFile ? "file" : st.isDirectory ? "dir" : "other";
-      console.debug(`[authord:debug] fs.exists -> ${pp} (true, ${kind})`);
-      return true;
-    } catch {
-      console.debug(`[authord:debug] fs.exists -> ${pp} (false)`);
-      return false;
-    }
-  }
-  async glob(_pattern: string, _cwd?: Path): Promise<readonly Path[]> {
-    return [];
-  }
-  async list(_dir: Path): Promise<readonly Path[]> {
-    return [];
-  }
-}
 
 /* ---------------------------------- Helpers --------------------------------- */
 
@@ -72,28 +41,7 @@ async function detectCfg(rootDir: string, explicit?: string | null) {
   return null;
 }
 
-/** Build ports and middleware from Confluence connection config. */
-function buildMiddleware(cfg: ConfluenceCfg, imagesDir: string) {
-  // Trigger Mermaid env defaults (width/height/theme) at startup
-  const _renderer = new MermaidRenderer();
 
-  const fs = new DenoFileSystem();
-  const markdown = new WritersideMarkdownTransformer(imagesDir);
-
-  const pageRepo = new ConfluencePageRepository(cfg);
-  const attachRepo = new ConfluenceAttachmentRepository(cfg);
-  const props = new ConfluencePropertyStore(cfg);
-
-  const middleware = new ConfluenceSinglePagePublisher({
-    fs,
-    markdown,
-    pageRepo,
-    attachRepo,
-    props,
-  });
-
-  return middleware;
-}
 
 /* ---------------------------------- Command --------------------------------- */
 
@@ -146,7 +94,7 @@ Env variables:
         const cfgExplicit = (options.cfg as string | undefined) ?? null;
         const cfgPath = await detectCfg(rootDir, cfgExplicit);
 
-        // Images dir // todo set image dir by parsing config here
+        // Images dir // todo set image dir by parsing config here because images dir hard coded here
         const imagesDir = resolveUnderRoot(
           rootDir,
           (options.images as string) || Deno.env.get("AUTHORD_IMAGE_DIR") || "images",
@@ -167,8 +115,7 @@ Env variables:
 
         const cfg: ConfluenceCfg = { baseUrl: asUrl(baseUrlStr), basicAuth };
 
-        const middleware = buildMiddleware(cfg, imagesDir);
-        const result = await middleware.execute({
+        const result = await ConfluenceSinglePagePublisher.build(cfg, imagesDir).execute({
           rootDir,
           cfgPath,
           mdPaths,

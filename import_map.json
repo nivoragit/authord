@@ -15,8 +15,10 @@
     "github-slugger": "npm:github-slugger@latest",
     "image-size": "npm:image-size@1",
     "unist": "npm:unist",
-    "mdast": "npm:@types/mdast",
+    "mdast" : "npm:@types/mdast",
+    "hast" : "npm:@types/hast@^3",
     "fxp": "npm:fast-xml-parser@4",
+    "unist-util-visit" : "npm:unist-util-visit@^5",
     "std/assert": "https://deno.land/std@0.224.0/assert/mod.ts",
     "xast-util-from-xml": "https://esm.sh/xast-util-from-xml@4",
     "xast": "https://esm.sh/@types/xast@2.0.4"

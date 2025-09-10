@@ -13,7 +13,7 @@
         "--base-url", "https://confluence.sumihiran.dev",
         "--basic-auth", "${input:basicAuth}",
         "--page-id", "163983",
-        "/Users/madushika/authord/sample/writerside"
+        "/Users/madushika/Downloads/docsmain2/docs"
       ],
       "attachSimplePort": 9229,
       "cwd": "${workspaceFolder}",
@@ -21,24 +21,20 @@
       "outputCapture": "std"
     },
     {
-      "name": "Deno CLI (debug) — env var basic auth",
+      "name": "Deno Test (debug) — xast_xml.test.ts",
       "type": "node",
       "request": "launch",
-      "program": "${workspaceFolder}/lib/cli.ts",
       "runtimeExecutable": "/Users/madushika/.deno/bin/deno",
-      "runtimeArgs": ["run", "-A", "--inspect-wait"],
-      "args": [
-        "confluence-single",
-        "--base-url", "https://confluence.sumihiran.dev",
-        "--basic-auth", "${env:CONFLUENCE_BASIC_AUTH}",
-        "--page-id", "163935",
-        "/Users/madushika/Downloads/docsmain/docs"
+      "runtimeArgs": [
+        "test",
+        "-A",
+        "--inspect-wait",
+        "tests/parse/xast_xml.test.ts"
       ],
-      "attachSimplePort": 9229,
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
-      "outputCapture": "std",
-      "envFile": "${workspaceFolder}/.env"
+      "attachSimplePort": 9229,
+      "outputCapture": "std"
     }
   ],
   "inputs": [
