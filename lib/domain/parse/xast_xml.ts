@@ -4,11 +4,10 @@
  * - Repairs invalid comment bodies (no `--` inside)
  * - Scrubs invalid XML 1.0 chars from text
  * - Masks protected segments (CDATA, comments, PIs) during entity/angle transforms
+ * - Normalizes Unicode spaces *inside tags* (outside quotes) → ASCII space
+ *   and drops zero-width marks inside tags
  * - Normalizes entities & stray ampersands
- * - Applies *container-aware* text policies via a single streaming pass:
- *     • Inside configured containers (e.g. xs:documentation), preserve a rich set of HTML tags
- *       or escape/neutralize others, *and* escape stray bare '<' safely (math-safe).
- *     • Tracks inner allowed-tag stack to neutralize *stray closing tags* (fixes `&lt;p&gt; ... </p>`).
+ * - Applies *container-aware* text policies via a single streaming pass
  *
  * Public surface:
  *   - preSanitize(xml, options?)
@@ -26,6 +25,7 @@ export interface XmlSanitizeOptions {
   stripProlog?: boolean;                        // default true
   fixInvalidComments?: boolean;                 // default true
   scrubInvalidXmlChars?: boolean;               // default true
+  normalizeUnicodeSpacesInTags?: boolean;       // default true
 
   // Entities
   entityPolicy?: "convert" | "escape" | "error"; // default "convert"
@@ -80,16 +80,44 @@ export interface XmlSanitizeOptions {
 
 const NOOP: (kind: string, detail: string) => void = () => {};
 
+/* ───────────────── Allowed tags: updated for Writerside ───────────────── */
+
 const ALLOW_INLINE_DEFAULT = [
+  // HTML/common inline
   "a","em","strong","b","i","u","s","code","kbd","var","samp","sub","sup","span","small",
-  "abbr","cite","q","mark","del","ins","br","img","tt"
+  "abbr","cite","q","mark","del","ins","br","img","tt",
+
+  // Writerside inline (new)
+  "emphasis",       // <emphasis>
+  "format",         // <format style="..." color="...">
+  "path",           // <path>
+  "control",        // <control>
+  "tooltip",        // <tooltip term="...">
+  "math",           // <math>
+  "icon",           // <icon src="..." ...>
+  "ui-path",        // <ui-path>
+  "shortcut"        // <shortcut key="..."> / <shortcut>...</shortcut>
 ];
 
 const ALLOW_RICH_DEFAULT = [
   ...ALLOW_INLINE_DEFAULT,
+
+  // HTML/common block
   "p","pre","ul","ol","li","table","thead","tbody","tfoot","tr","td","th",
   "dl","dt","dd","blockquote","figure","figcaption","hr",
-  "h1","h2","h3","h4","h5","h6"
+  "h1","h2","h3","h4","h5","h6",
+
+  // Writerside block-ish (safe to keep when author uses them in rich text containers)
+  "list","deflist","def",
+  "tabs","tab",
+  "compare",
+  "code-block",
+  "video","inline-frame",
+  "resource","property",
+  "seealso","category",
+  "group","links","cards","card","spotlight",
+  "description","tldr",
+  "primary","secondary","misc"
 ];
 
 const DEFAULTS: Required<Omit<XmlSanitizeOptions, "onChange">> & {
@@ -98,12 +126,23 @@ const DEFAULTS: Required<Omit<XmlSanitizeOptions, "onChange">> & {
   stripProlog: true,
   fixInvalidComments: true,
   scrubInvalidXmlChars: true,
+  normalizeUnicodeSpacesInTags: true,
 
   entityPolicy: "convert",
   namedEntities: {},
 
-  richTextContainers: ["documentation", "link-summary", "card-summary", "web-summary"],
+  // Treat these as “rich text” containers when they appear with real open/close tags
+  // (self-closing instances will NOT push context; see function below).
+  richTextContainers: [
+    "documentation",   // xs:documentation
+    "link-summary",
+    "card-summary",
+    "web-summary",
+    "description",
+    "tldr"
+  ],
   inlineTextContainers: ["p"],
+
   forceTextInContainers: false,
   escapeUnknownTagMentionsInText: true,
   allowedInlineTags: ALLOW_INLINE_DEFAULT,
@@ -112,6 +151,7 @@ const DEFAULTS: Required<Omit<XmlSanitizeOptions, "onChange">> & {
 
   onChange: NOOP,
 };
+
 
 /* ────────────────────── Utilities: chars, names, fences ────────────────────── */
 
@@ -269,6 +309,74 @@ const BUILTIN_ENTITIES: Record<string, number> = {
   larr: 8592, uarr: 8593, rarr: 8594, darr: 8595, harr: 8596, times: 215, divide: 247,
 };
 
+/* ────────────────────── NEW: normalize Unicode spaces inside tags ────────────────────── */
+
+const UNICODE_SPACE_IN_TAG = /[\u00A0\u1680\u2000-\u200A\u202F\u205F\u3000\u2028\u2029]/;
+const ZERO_WIDTH_MARKS = /[\u200B-\u200D\u2060\uFEFF]/;
+
+function isLikelyTagStart(s: string, i: number): boolean {
+  // assumes s[i] === '<'
+  const n = s[i + 1];
+  // element start, closing tag, PI/doctype; comments/CDATA are already masked earlier
+  return !!n && /[A-Za-z_/?]/.test(n);
+}
+
+/**
+ * Replace Unicode space separators with ASCII space *inside tag markup* (outside quotes),
+ * and drop zero-width marks inside tags. Leaves text content and quoted attribute values intact.
+ */
+function normalizeUnicodeSpacesInsideTags(s: string): string {
+  let out = "";
+  let i = 0;
+  let inTag = false;
+  let quote: '"' | "'" | null = null;
+
+  while (i < s.length) {
+    const ch = s[i]!;
+    if (!inTag) {
+      if (ch === "<" && isLikelyTagStart(s, i)) {
+        inTag = true;
+      }
+      out += ch;
+      i++;
+      continue;
+    }
+
+    // inTag === true
+    if (quote) {
+      if (ch === quote) quote = null;
+      out += ch;
+      i++;
+      continue;
+    }
+
+    if (ch === '"' || ch === "'") {
+      quote = ch as '"' | "'";
+      out += ch;
+      i++;
+      continue;
+    }
+
+    if (ch === ">") {
+      inTag = false;
+      out += ch;
+      i++;
+      continue;
+    }
+
+    // unquoted, still inside tag: normalize
+    if (UNICODE_SPACE_IN_TAG.test(ch)) {
+      out += " ";
+    } else if (ZERO_WIDTH_MARKS.test(ch)) {
+      // drop it
+    } else {
+      out += ch;
+    }
+    i++;
+  }
+  return out;
+}
+
 function normalizeEntitiesAndAmpersands(
   s: string,
   entityPolicy: XmlSanitizeOptions["entityPolicy"],
@@ -308,7 +416,6 @@ function normalizeEntitiesAndAmpersands(
           out += `&#${code};`; onChange("entity", `&${name};→&#${code};`);
         } else {
           if (entityPolicy === "error") throw new Error(`[authord] Unknown named entity: &${name};`);
-          // "convert" and "escape" both fall through to escaping the ampersand to be safe
           out += `&amp;${name};`; onChange("entity-unknown", `&${name};→&amp;${name};`);
         }
         i = j; continue;
@@ -386,138 +493,96 @@ function applyContainerPoliciesStream(
   const allowInline = new Set(o.allowedInlineTags.map(x => x.toLowerCase()));
   const allowRich = new Set(o.allowedRichTags.map(x => x.toLowerCase()));
 
-  type Ctx = {
-    kind: "rich" | "inline";
-    nameLocal: string;           // container's local name
-    innerStack: string[];        // allowed inner tags stack to validate closers
-  };
-
+  type Ctx = { kind: "rich" | "inline"; nameLocal: string; innerStack: string[] };
   const ctxStack: Ctx[] = [];
   const top = () => ctxStack[ctxStack.length - 1];
 
-  const isContainerOpen = (local: string) =>
-    richNames.has(local) || inlineNames.has(local);
-
-  const containerKindOf = (local: string): Ctx["kind"] =>
-    richNames.has(local) ? "rich" : "inline";
-
-  const allowedForKind = (kind: Ctx["kind"]) =>
-    kind === "rich" ? allowRich : allowInline;
+  const isContainerOpen = (local: string) => richNames.has(local) || inlineNames.has(local);
+  const containerKindOf = (local: string): Ctx["kind"] => richNames.has(local) ? "rich" : "inline";
+  const allowedForKind = (kind: Ctx["kind"]) => (kind === "rich" ? allowRich : allowInline);
 
   let out = "";
   let i = 0;
 
   while (i < s.length) {
     const ch = s[i]!;
-    if (ch !== "<") {
-      out += ch;
-      i++;
-      continue;
-    }
+    if (ch !== "<") { out += ch; i++; continue; }
 
     const tag = parseTagDetailed(s, i);
     if (!tag.valid) {
-      // Bare '<' (not a complete tag)
-      if (ctxStack.length && o.escapeBareAnglesInText) {
-        out += "&lt;";
-        i++; // do not swallow more; keep scanning
-      } else {
-        out += "<";
-        i++;
+      // Only escape bare '<' while INSIDE a text container
+      if (ctxStack.length && o.escapeBareAnglesInText) { out += "&lt;"; i++; }
+      else { out += "<"; i++; }
+      continue;
+    }
+
+    const tagText = s.slice(i, tag.end);
+    const current = top();
+
+    // 1) Entering a container? (ignore self-closing)
+    if (!tag.closing && isContainerOpen(tag.local)) {
+      out += tagText;
+      i = tag.end;
+      if (!tag.selfClosing) {
+        ctxStack.push({ kind: containerKindOf(tag.local), nameLocal: tag.local, innerStack: [] });
       }
       continue;
     }
 
-    // We have a well-formed tag token [i, tag.end)
-    const tagText = s.slice(i, tag.end);
-    const current = top();
-
-    // Handle container enter/exit regardless of forceTextInContainers
-    if (!tag.closing && isContainerOpen(tag.local)) {
-      // opening a container
-      ctxStack.push({ kind: containerKindOf(tag.local), nameLocal: tag.local, innerStack: [] });
-      out += tagText;
-      i = tag.end;
-      continue;
-    }
-
+    // 2) Leaving a container?
     if (tag.closing && current && tag.local === current.nameLocal) {
-      // closing current container
       out += tagText;
       ctxStack.pop();
       i = tag.end;
       continue;
     }
 
-    // Inside any container?
+    // 3) Inside a container → enforce allowed content
     if (current) {
       if (o.forceTextInContainers) {
-        // Neutralize everything inside, except container's own closing (handled above).
+        // Treat any tag as literal text inside containers
         out += "&lt;" + tagText.slice(1, -1).replace(/</g, "&lt;").replace(/>/g, "&gt;") + "&gt;";
         i = tag.end;
         continue;
       }
 
-      // Not forced → keep allowed sets; preserve namespaced tags by default.
       const allowSet = allowedForKind(current.kind);
       const isNamespaced = tag.qname.includes(":");
 
+      // Namespaced tags are preserved (Confluence/ri/ac, xs:…, etc.)
       if (isNamespaced) {
-        // keep namespaced tags intact (authors often embed ac:, ri:, etc.)
+        // maintain simple inner balance for prettiness
         if (!tag.closing && !tag.selfClosing) current.innerStack.push(tag.local);
-        if (tag.closing) {
-          if (current.innerStack[current.innerStack.length - 1] === tag.local) current.innerStack.pop();
-          else {
-            // stray closer for namespaced tag → neutralize
-            out += `&lt;/${tag.qname}&gt;`;
-            i = tag.end;
-            continue;
-          }
-        }
-        out += tagText;
-        i = tag.end;
-        continue;
+        else if (tag.closing && current.innerStack[current.innerStack.length - 1] === tag.local) current.innerStack.pop();
+        out += tagText; i = tag.end; continue;
       }
 
-      // Non-namespaced: allowed?
+      // Non-namespaced: check allowed
       const allowed = allowSet.has(tag.local);
       if (allowed) {
         if (!tag.closing && !tag.selfClosing) current.innerStack.push(tag.local);
-        if (tag.closing) {
-          // only accept if it matches current stack top; else neutralize stray closer
-          if (current.innerStack[current.innerStack.length - 1] === tag.local) current.innerStack.pop();
-          else {
-            out += `&lt;/${tag.qname}&gt;`;
-            i = tag.end;
-            continue;
-          }
-        }
-        out += tagText;
-        i = tag.end;
-        continue;
+        else if (tag.closing && current.innerStack[current.innerStack.length - 1] === tag.local) current.innerStack.pop();
+        out += tagText; i = tag.end; continue;
       }
 
-      // Unknown tag mention inside container
+      // Unknown inside text container → either escape or keep verbatim
       if (o.escapeUnknownTagMentionsInText) {
-        // turn ENTIRE tag to literal text
         out += "&lt;" + tagText.slice(1, -1).replace(/</g, "&lt;").replace(/>/g, "&gt;") + "&gt;";
-        i = tag.end;
-        continue;
       } else {
-        // allow as-is
         out += tagText;
-        i = tag.end;
-        continue;
       }
+      i = tag.end;
+      continue;
     }
 
-    // Outside containers: pass through
+    // 4) Outside containers → pass-through
     out += tagText;
     i = tag.end;
   }
 
   return out;
 }
+
 
 /* ───────────────────────── Public sanitize API ───────────────────────── */
 
@@ -533,9 +598,14 @@ export function preSanitize(xml: string, opts: XmlSanitizeOptions = {}): string 
   if (o.fixInvalidComments) s = repairInvalidComments(s);
   if (o.scrubInvalidXmlChars) s = scrubInvalidXmlCharsInText(s);
 
-  // 2) Mask protected segments while we normalize entities/angles
+  // 2) Mask protected segments while we normalize inside-tag whitespace & entities
   const masked = maskProtectedSegments(s);
   let work = masked.text;
+
+  // 2a) Normalize Unicode whitespace inside tag markup (outside quotes)
+  if (o.normalizeUnicodeSpacesInTags) {
+    work = normalizeUnicodeSpacesInsideTags(work);
+  }
 
   // 3) Entities / ampersands
   work = normalizeEntitiesAndAmpersands(work, o.entityPolicy, entities, log);
@@ -559,6 +629,12 @@ export function preSanitize(xml: string, opts: XmlSanitizeOptions = {}): string 
 /* ───────────────────────── Parse & helpers ───────────────────────── */
 
 export function parseXmlToXast(xml: string, opts?: XmlSanitizeOptions): Root {
+  // if (opts) {
+  //   opts.escapeUnknownTagMentionsInText = true; // safe default
+  //   // (optional) add any additional Writerside containers you use often:
+  //   opts.richTextContainers = ["documentation","link-summary","card-summary","web-summary","description","tldr"] ;
+  // }
+ 
   const sanitized = preSanitize(xml, opts);
   try {
     return fromXml(sanitized);
@@ -572,7 +648,7 @@ export function parseXmlToXast(xml: string, opts?: XmlSanitizeOptions): Root {
 }
 
 export function getRootElement(ast: Root): XEl {
-  const el = ast.children.find((n) => n.type === "element") as XEl | undefined;
+  const el = ast.children.find((n:any) => n.type === "element") as XEl | undefined;
   if (!el) throw new Error("XML has no root element");
   return el;
 }
@@ -586,7 +662,7 @@ export function childElements(el: XEl, name?: string): XEl[] {
     const i = q.indexOf(":");
     return i >= 0 ? q.slice(i + 1) : q;
   };
-  return (el.children.filter((c) => c.type === "element") as XEl[])
+  return (el.children.filter((c:any) => c.type === "element") as XEl[])
     .filter((c) => (name ? local(c.name) === name : true));
 }
 

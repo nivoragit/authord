@@ -1,18 +1,30 @@
+// deno-lint-ignore-file no-explicit-any
 /**
  * Rehype plugin: HAST → Confluence/DC storage XHTML.
  *
- * Key points:
- *  - Single-pass visit from root children
- *  - Minimal regex
- *  - Memoized image-size I/O; Deno.readFileSync-first with Node fallback
- *  - Handles: <img>→<ac:image>, Writerside @@ATTACH (border-effect), trailing `{...}` blocks,
- *             GFM task lists, <del>→<span style="text-decoration:line-through;">, unwrap <a><ac:image/></a>,
- *             self-close voids, TOC injection (top/after-first-h1), CDATA fixes in <code-block lang="xml">
+ * Responsibilities (single-pass, local rewrites):
+ *  - Images: <img> → <ac:image><ri:attachment/></ac:image>, Writerside @@ATTACH, trailing "{width=..}" blocks,
+ *            memoized original size (Deno.readFileSync-first, Node fallback), unwrap <a><ac:image/></a>
+ *  - Video: <video> → widget/multimedia macros (YouTube/Vimeo URL or local attachment), map width/height
+ *  - Code: <code-block> → Confluence "code" macro (language, collapse, disable-links, title),
+ *           CDATA rewrite for lang="xml" (also replaces <img> inside CDATA to @@ATTACH)
+ *  - Compare: <compare> → 2-col table (or top-bottom) with before/after titles
+ *  - Links: <a> with Writerside anchor → href#anchor; unwrap <a><ac:image/></a>
+ *  - Inline: <emphasis>→<em>, <format>→<span style=...>, <code> stays <code>
+ *  - UI text: <control>/<path>/<ui-path> → <span>/<code> with classes
+ *  - Admonitions: <note>/<tip>/<warning> → Confluence info/tip/warning macros
+ *  - Lists: <list>/<li> → ul/ol, type/start/columns
+ *  - Tables: header-row/column/both, border, width, table-layout fixed, colspan/rowspan
+ *  - TOC: <show-structure> drives ac:structured-macro name="toc" (depth), plus options.insertToc
+ *  - Hygiene: self-close voids, normalize attributes/classes, wrap top-level ac:image in <p>, keep <del> mapping
+ *  - Reporting: compute "filtered list (missing tags)" vs. a configured Writerside tag set and expose it.
  */
 
-import * as fs from "node:fs"; // fallback when Deno isn't available
+import * as fs from "node:fs"; // Fallback when Deno isn't available
 import { imageSize } from "npm:image-size@1";
 import { IMAGE_DIR } from "../utils/images.ts";
+
+/* ────────────────────────────── HAST Types ────────────────────────────── */
 
 type HNode = {
   type: string;
@@ -24,29 +36,81 @@ type HNode = {
 };
 type HRoot = HNode;
 
+/* ────────────────────────────── Missing-tags reporting ────────────────────────────── */
+
+export interface MissingTagsReport {
+  /** union of all filtered tags that actually appeared (lowercased, no angle brackets) */
+  encountered: string[];
+  /** group → missing tags (sorted) */
+  missingByGroup: Record<string, string[]>;
+  /** flat set of missing tags across all groups (sorted, unique) */
+  missingFlat: string[];
+}
+
+/** Filtered tag groups from your spec (all lowercased, no angle brackets) */
+const FILTER_TAG_GROUPS: Record<string, ReadonlyArray<string>> = {
+  "API Documentation": ["api-doc","api-endpoint","api-schema","api-webhook"],
+  "Section / Navigation / Summary": [
+    "section-starting-page","cards","card","card-summary","category","group",
+    "links","misc","primary","primary-label","secondary","secondary-label",
+    "seealso","contribute-url","description"
+  ],
+  "Definition Lists": ["def","deflist"],
+  "Procedures & Steps": ["procedure","step"],
+  "Snippet / Include": ["snippet","include"],
+  "Conditionals": ["if"],
+  "Metadata": ["help-id","link-summary","web-file-name","web-summary"],
+  "Glossary / Tooltip": ["tooltip"],
+  "Shortcuts / UI": ["shortcut","ui-path"], // ui-menu intentionally excluded
+  "Variables": ["var","value"],
+  "Titles": ["title"],
+  "Topic Wrapper": ["topic"],
+  "Resource / Properties": ["resource","property"],
+};
+
+const FILTER_TAGS_UNION: ReadonlySet<string> = new Set(
+  Object.values(FILTER_TAG_GROUPS).flat().map((t) => t.toLowerCase())
+);
+
 export interface RehypeConfluenceOptions {
   insertToc?: boolean;
   tocMacroId?: string;
   tocMaxLevel?: number;
   tocPosition?: "top" | "after-first-h1";
+
+  /** Log the missing-tags report to console.warn at the end of a run */
+  reportMissingTags?: boolean;
+  /**
+   * Callback to receive the missing-tags report.
+   * Also available on tree.data.confluenceMissingTags.
+   */
+  onMissingTags?: (report: MissingTagsReport) => void;
 }
 
+/* ────────────────────────────── Constants ────────────────────────────── */
+
 const HTML_VOID = new Set([
-  "area","base","br","col","embed","hr","img","input","keygen","link","meta","param","source","track","wbr",
+  "area", "base", "br", "col", "embed", "hr", "img", "input", "keygen", "link", "meta", "param", "source", "track", "wbr",
 ]);
 
-/* ────────────── Deno/Node I/O, basename, tokens ────────────── */
+/* ────────────────────────────── I/O helpers ────────────────────────────── */
 
 function readFileSyncCompat(filePath: string): Uint8Array | null {
   try {
-    // @ts-ignore
+    // @ts-ignore Deno in Deno runtime
     if (typeof Deno !== "undefined" && Deno.readFileSync) {
       // @ts-ignore
       return Deno.readFileSync(filePath);
     }
-  } catch {}
-  try { return fs.readFileSync(filePath); } catch { return null; }
+  } catch { /* ignore */ }
+  try {
+    return fs.readFileSync(filePath);
+  } catch {
+    return null;
+  }
 }
+
+/* ────────────────────────────── String helpers ────────────────────────────── */
 
 function basenameFromSrc(src: string): string {
   let s = String(src);
@@ -99,7 +163,10 @@ function readSizeFromStyle(style: unknown): { w?: string; h?: string } {
     let val = decl.slice(i + 1).trim().toLowerCase();
     if (key !== "width" && key !== "height") continue;
     if (val.endsWith("px")) val = val.slice(0, -2);
-    if (isDigits(val)) { if (key === "width" && w == null) w = val; if (key === "height" && h == null) h = val; }
+    if (isDigits(val)) {
+      if (key === "width" && w == null) w = val;
+      if (key === "height" && h == null) h = val;
+    }
   }
   return { w, h };
 }
@@ -113,7 +180,8 @@ function normalizePx(v: unknown): string | undefined {
   return undefined;
 }
 
-/* ────────────── memoized image sizes ────────────── */
+/* ────────────────────────────── Image size cache ────────────────────────────── */
+
 const sizeCache = new Map<string, { w?: number; h?: number }>();
 function getOriginalSize(file: string): { w?: number; h?: number } {
   if (sizeCache.has(file)) return sizeCache.get(file)!;
@@ -125,13 +193,13 @@ function getOriginalSize(file: string): { w?: number; h?: number } {
       sizeCache.set(file, out);
       return out;
     }
-  } catch {}
+  } catch { /* ignore */ }
   const out = { w: undefined, h: undefined };
   sizeCache.set(file, out);
   return out;
 }
 
-/* ────────────── Writerside/XML helpers ────────────── */
+/* ────────────────────────────── Writerside/XML helpers ────────────────────────────── */
 
 function parseTagAttributes(attrStr: string): Record<string, string> {
   const out: Record<string, string> = {};
@@ -168,15 +236,14 @@ function parseTagAttributes(attrStr: string): Record<string, string> {
 }
 
 function replaceImgTagsWithAttach(text: string): string {
+  // Replace <img ...> inside raw text/CDATA with Writerside @@ATTACH token
   let out = "";
   const n = text.length;
   let i = 0;
-
   while (i < n) {
     const lt = text.indexOf("<", i);
     if (lt < 0) { out += text.slice(i); break; }
     out += text.slice(i, lt);
-
     if (text.slice(lt + 1, lt + 4).toLowerCase() === "img") {
       let j = lt + 4, attrs = "";
       while (j < n) { const ch = text[j]!; if (ch === ">") { j++; break; } attrs += ch; j++; }
@@ -224,41 +291,13 @@ function collectCodeBlockText(n: HNode): string {
   return out;
 }
 
-function rewriteCodeBlockCdata(el: HNode) {
-  if (!el || el.type !== "element" || (el.tagName || "").toLowerCase() !== "code-block") return;
-  const props = el.properties || {};
-  const lang = (props.lang ?? props.language ?? "").toString().toLowerCase();
-  if (lang !== "xml" || !Array.isArray(el.children)) return;
-
-  const buf = collectCodeBlockText(el);
-  let rewritten = rewriteAnyCdataText(buf);
-  if (rewritten == null && buf.indexOf("<img") >= 0) {
-    const inner = replaceImgTagsWithAttach(buf);
-    rewritten = `<!--[CDATA[${inner}]]-->`;
-  }
-  if (rewritten != null) {
-    const commentValue = rewritten.replace(/^<!--\[CDATA\[/, "[CDATA[").replace(/\]\]-->$/, "]]");
-    el.children = [{ type: "comment", value: commentValue }];
-  }
-}
-
-/* ────────────── trailing {width=.. height=..} blocks ────────────── */
-
-function collectPlainText(n: HNode): string {
-  if (!n) return "";
-  if (n.type === "text" && typeof (n as any).value === "string") return String((n as any).value);
-  if (Array.isArray(n.children)) { let s = ""; for (const ch of n.children) s += collectPlainText(ch as HNode); return s; }
-  return "";
-}
+/* ────────────────────────────── Trailing {width=..} blocks ────────────────────────────── */
 
 function consumeAttrBlocksFromFollowingText(
   parent: HNode,
   startIndex: number,
 ): { w?: string; h?: string; consumed: boolean } {
   const kids = parent.children || [];
-
-  // Collect ONLY consecutive text nodes after the image/custom-image.
-  // Do NOT skip over any elements (even if visually empty).
   const textSegs: { idx: number; node: HNode; text: string }[] = [];
   let i = startIndex + 1;
   while (i < kids.length) {
@@ -268,45 +307,29 @@ function consumeAttrBlocksFromFollowingText(
       i++;
       continue;
     }
-    break; // stop at first non-text sibling
+    break;
   }
-
   if (textSegs.length === 0) return { consumed: false };
 
-  // Stitch text
-  let buf = "";
-  for (const s of textSegs) buf += s.text;
+  let buf = ""; for (const s of textSegs) buf += s.text;
 
-  // Parse one-or-more `{...}` blocks ONLY if each has a closing `}` in buf.
   let pos = 0;
   let w: string | undefined;
   let h: string | undefined;
   let consumedAny = false;
 
   while (pos < buf.length) {
-    // skip whitespace
     while (pos < buf.length && /\s/.test(buf[pos]!)) pos++;
     if (buf[pos] !== "{") break;
-
-    // Require a matching closing brace in the combined text buffer.
     const close = buf.indexOf("}", pos + 1);
-    if (close === -1) break; // unterminated → bail completely (leave literal text)
+    if (close === -1) break;
 
     const inner = buf.slice(pos + 1, close);
-
-    // tokens: k:v or k=v separated by spaces/commas
-    let token = "";
-    const tokens: string[] = [];
+    let token = ""; const tokens: string[] = [];
     for (let j = 0; j < inner.length; j++) {
       const ch = inner[j]!;
-      if (ch === " " || ch === "\t" || ch === ",") {
-        if (token) {
-          tokens.push(token);
-          token = "";
-        }
-      } else {
-        token += ch;
-      }
+      if (ch === " " || ch === "\t" || ch === ",") { if (token) { tokens.push(token); token = ""; } }
+      else token += ch;
     }
     if (token) tokens.push(token);
 
@@ -316,19 +339,14 @@ function consumeAttrBlocksFromFollowingText(
       const k = kv.slice(0, eq).trim().toLowerCase();
       let v = kv.slice(eq + 1).trim().toLowerCase();
       if (v.endsWith("px")) v = v.slice(0, -2);
-      if (isDigits(v)) {
-        if (k === "width" && w == null) w = v;
-        if (k === "height" && h == null) h = v;
-      }
+      if (isDigits(v)) { if (k === "width" && w == null) w = v; if (k === "height" && h == null) h = v; }
     }
-
-    pos = close + 1; // advance past '}'
+    pos = close + 1;
     consumedAny = true;
   }
 
   if (!consumedAny) return { consumed: false };
 
-  // Reflect consumed prefix (up to 'pos') back into the actual text nodes.
   let remaining = pos;
   for (const s of textSegs) {
     const len = s.text.length;
@@ -342,18 +360,31 @@ function consumeAttrBlocksFromFollowingText(
       break;
     }
   }
-
-  // Remove text nodes that became empty (no element removals).
   for (let k = textSegs.length - 1; k >= 0; k--) {
     const s = textSegs[k];
     if (((s.node as any).value || "") === "") kids.splice(s.idx, 1);
   }
-
   return { w, h, consumed: true };
 }
 
+/* ────────────────────────────── Confluence builders ────────────────────────────── */
 
-/* ────────────── ac:image / @@ATTACH builders ────────────── */
+function acParam(name: string, value: string): HNode {
+  return { type: "element", tagName: "ac:parameter", properties: { "ac:name": name }, children: [{ type: "text", value }] };
+}
+function acRichTextBody(children: HNode[]): HNode {
+  return { type: "element", tagName: "ac:rich-text-body", properties: {}, children };
+}
+function acPlainTextBody(text: string): HNode {
+  // Confluence will serialize this as CDATA
+  return { type: "element", tagName: "ac:plain-text-body", properties: {}, children: [{ type: "text", value: text }] };
+}
+function acMacro(name: string, params?: Record<string, string>, bodyChildren?: HNode[]): HNode {
+  const kids: HNode[] = [];
+  if (params) for (const [k, v] of Object.entries(params)) kids.push(acParam(k, v));
+  if (bodyChildren && bodyChildren.length) kids.push(acRichTextBody(bodyChildren));
+  return { type: "element", tagName: "ac:structured-macro", properties: { "ac:name": name, "ac:schema-version": "1" }, children: kids };
+}
 
 function makeAcImageFromSrc(
   src: string,
@@ -368,12 +399,12 @@ function makeAcImageFromSrc(
 
   const wStr =
     typeof width === "number" ? String(width)
-    : typeof width === "string" ? normalizePx(width)
-    : styleSz.w;
+      : typeof width === "string" ? normalizePx(width)
+        : styleSz.w;
   const hStr =
     typeof height === "number" ? String(height)
-    : typeof height === "string" ? normalizePx(height)
-    : styleSz.h;
+      : typeof height === "string" ? normalizePx(height)
+        : styleSz.h;
 
   if (wStr && isDigits(wStr)) props["ac:width"] = wStr;
   if (hStr && isDigits(hStr)) props["ac:height"] = hStr;
@@ -407,7 +438,13 @@ function convertImgToAttachToken(imgProps: Record<string, any>): HNode {
   return { type: "text", value: parts.join("|") + "@@" };
 }
 
-/* ────────────── TOC helpers ────────────── */
+/* ────────────────────────────── URL helpers ────────────────────────────── */
+
+function isHttpUrl(u: string): boolean { return /^https?:\/\//i.test(u); }
+function isYouTube(u: string): boolean { return /(^https?:\/\/(www\.)?youtube\.com\/watch\?v=|^https?:\/\/youtu\.be\/)/i.test(u); }
+function isVimeo(u: string): boolean { return /^https?:\/\/(www\.)?vimeo\.com\//i.test(u); }
+
+/* ────────────────────────────── TOC helpers ────────────────────────────── */
 
 function hasTocMacro(el: HNode): boolean {
   return (
@@ -421,32 +458,127 @@ function buildTocMacro(macroId: string, maxLevel: number): HNode {
     type: "element",
     tagName: "ac:structured-macro",
     properties: { "ac:name": "toc", "ac:schema-version": "1", "ac:macro-id": macroId },
-    children: [{ type: "element", tagName: "ac:parameter", properties: { "ac:name": "maxLevel" }, children: [{ type: "text", value: String(maxLevel) }] }],
+    children: [acParam("maxLevel", String(maxLevel))],
   };
 }
 
-/* ────────────── main plugin ────────────── */
+/* ────────────────────────────── Main plugin ────────────────────────────── */
 
 export default function rehypeConfluenceStorage(opts: RehypeConfluenceOptions = {}) {
   const insertToc = opts.insertToc === true;
   const tocMacroId = opts.tocMacroId ?? "a854a720-dea6-4d0f-a0a2-e4591c07d85e";
-  const tocMaxLevel = Number.isFinite(opts.tocMaxLevel) ? Number(opts.tocMaxLevel) : 3;
+  const defaultTocMaxLevel = Number.isFinite(opts.tocMaxLevel) ? Number(opts.tocMaxLevel) : 3;
   const tocPosition: "top" | "after-first-h1" = opts.tocPosition ?? "top";
 
   return (tree: HRoot) => {
-    const state = { foundToc: false };
+    const state = {
+      foundToc: false,
+      requestedToc: false,
+      requestedTocDepth: defaultTocMaxLevel,
+    };
+
+    // ── Missing-tags reporting accumulators
+    const encounteredFiltered = new Set<string>();
+
+    /* ────────────── Small helpers per-visit ────────────── */
 
     function stripTaskClasses(el: HNode) {
       const props = el.properties || (el.properties = {});
       const tokens = getClassList(props);
-      const kept = tokens.filter(t => t !== "contains-task-list" && t !== "task-list-item");
+      const kept = tokens.filter((t) => t !== "contains-task-list" && t !== "task-list-item");
       setClassList(props, kept);
     }
 
-    const handlers: Record<string, (el: HNode, parent: HNode, idx: number) => void> = {
-      "code-block": (el) => { rewriteCodeBlockCdata(el); },
+    function replaceNode(parent: HNode, idx: number, repl: HNode) {
+      parent.children!.splice(idx, 1, repl);
+    }
 
-      input: (el, parent, idx) => {
+    /* ────────────── Tag handlers ────────────── */
+
+    const handlers: Record<string, (el: HNode, parent: HNode, idx: number) => void> = {
+      /* code-block → code macro with plain-text-body */
+      "code-block": (el, parent, idx) => {
+        const props = el.properties || {};
+        const lang = (props.lang ?? props.language ?? "plain text").toString();
+        let codeText = collectCodeBlockText(el);
+
+        // Special case: fix CDATA/embedded <img> for XML blocks
+        if (String(lang).toLowerCase() === "xml") {
+          const rewritten = rewriteAnyCdataText(codeText);
+          if (rewritten) codeText = rewritten;
+          else if (codeText.indexOf("<img") >= 0) {
+            codeText = `<!--[CDATA[${replaceImgTagsWithAttach(codeText)}]]-->`;
+          }
+        }
+
+        const params: Record<string, string> = { language: String(lang) };
+        if (props["collapsed-title"]) params.title = String(props["collapsed-title"]);
+        if (props["disable-links"] === "true" || props["disable-links"] === true) params.disableLinks = "true";
+        const collapsible = props.collapsible === "true" || props.collapsible === true;
+        if (collapsible) params.collapse = (props["default-state"] === "collapsed") ? "true" : "false";
+
+        const macro = acMacro("code", params);
+        (macro.children ||= []).push(acPlainTextBody(codeText));
+
+        replaceNode(parent, idx, macro);
+      },
+
+      /* Compare: 2-up table by default, top-bottom if type=top-bottom */
+      "compare": (el, parent, idx) => {
+        const p = el.properties || {};
+        const type = String(p.type ?? p.style ?? "left-right").toLowerCase();
+        const titleA = String(p["title-before"] ?? p["first-title"] ?? "Before");
+        const titleB = String(p["title-after"] ?? p["second-title"] ?? "After");
+
+        // Find first two content children (usually code-blocks already converted by recursion)
+        const kids = (el.children || []).filter((c) => c && typeof c === "object") as HNode[];
+
+        if (type === "top-bottom" || type === "top-down") {
+          const container: HNode = { type: "element", tagName: "div", properties: { className: ["ws-compare", "ws-vertical"] }, children: [] };
+          const sec = (title: string, body: HNode | null): HNode => ({
+            type: "element",
+            tagName: "div",
+            properties: { className: ["ws-compare-pane"] },
+            children: [
+              { type: "element", tagName: "h4", properties: {}, children: [{ type: "text", value: title }] },
+              ...(body ? [body] : []),
+            ],
+          });
+          container.children!.push(sec(titleA, kids[0] ?? null));
+          container.children!.push(sec(titleB, kids[1] ?? null));
+          replaceNode(parent, idx, container);
+        } else {
+          const table: HNode = {
+            type: "element",
+            tagName: "table",
+            properties: { className: ["ws-compare", "ws-grid-2"] },
+            children: [
+              {
+                type: "element",
+                tagName: "tr",
+                properties: {},
+                children: [
+                  { type: "element", tagName: "th", properties: {}, children: [{ type: "text", value: titleA }] },
+                  { type: "element", tagName: "th", properties: {}, children: [{ type: "text", value: titleB }] },
+                ],
+              },
+              {
+                type: "element",
+                tagName: "tr",
+                properties: {},
+                children: [
+                  { type: "element", tagName: "td", properties: {}, children: kids[0] ? [kids[0]] : [] },
+                  { type: "element", tagName: "td", properties: {}, children: kids[1] ? [kids[1]] : [] },
+                ],
+              },
+            ],
+          };
+          replaceNode(parent, idx, table);
+        }
+      },
+
+      /* Input checkbox → [x]/[ ] text */
+      "input": (el, parent, idx) => {
         const props = el.properties || {};
         if (props.type === "checkbox") {
           const checked = (("checked" in props && props.checked !== false) || props["aria-checked"] === "true");
@@ -454,9 +586,11 @@ export default function rehypeConfluenceStorage(opts: RehypeConfluenceOptions = 
         }
       },
 
-      ul: stripTaskClasses,
-      li: stripTaskClasses,
+      /* Lists hygiene and mapping */
+      "ul": stripTaskClasses,
+      "li": stripTaskClasses,
 
+      /* Writerside pseudo "confluence-image" → ac:image */
       "confluence-image": (el, parent, idx) => {
         const p = el.properties || {};
         const filename = String(p.filename ?? "").trim();
@@ -470,21 +604,20 @@ export default function rehypeConfluenceStorage(opts: RehypeConfluenceOptions = 
           if (consumed.w || consumed.h) q["ac:thumbnail"] = "true";
           ac.properties = q;
         }
-        parent.children!.splice(idx, 1, ac);
+        replaceNode(parent, idx, ac);
       },
 
-      img: (el, parent, idx) => {
+      /* <img> → <ac:image> (unless border-effect → @@ATTACH token) */
+      "img": (el, parent, idx) => {
         const p = el.properties || {};
         const src = p.src ?? "";
         if (!src) return;
 
-        // Writerside: any <img> with border-effect → @@ATTACH
         if (Object.prototype.hasOwnProperty.call(p, "border-effect")) {
           parent.children!.splice(idx, 1, convertImgToAttachToken(p));
           return;
         }
 
-        // Normal HTML/MD image → <ac:image>
         let ac = makeAcImageFromSrc(String(src), p.width, p.height, p.style, p.alt);
         const consumed = consumeAttrBlocksFromFollowingText(parent, idx);
         if (consumed.consumed) {
@@ -494,43 +627,255 @@ export default function rehypeConfluenceStorage(opts: RehypeConfluenceOptions = 
           if (consumed.w || consumed.h) q["ac:thumbnail"] = "true";
           ac.properties = q;
         }
-        parent.children!.splice(idx, 1, ac);
+        replaceNode(parent, idx, ac);
       },
 
-      a: (el, parent, idx) => {
+      /* <video> → widget/multimedia macro */
+      "video": (el, parent, idx) => {
+        const p = el.properties || {};
+        const src = String(p.src ?? "").trim();
+        if (!src) return;
+
+        const w = normalizePx(p.width);
+        const h = normalizePx(p.height);
+        const borderEffect = p["border-effect"];
+
+        if (isHttpUrl(src) && (isYouTube(src) || isVimeo(src))) {
+          const params: Record<string, string> = { url: src };
+          if (w) params.width = w;
+          if (h) params.height = h;
+          const macro = acMacro("widget", params);
+          replaceNode(parent, idx, macro);
+        } else {
+          // Assume local attachment (mp4/webm)
+          const file = basenameFromSrc(src);
+          const params: Record<string, string> = {};
+          if (w) params.width = w;
+          if (h) params.height = h;
+          if (borderEffect && borderEffect !== "none") params.border = String(borderEffect);
+
+          const macro: HNode = acMacro("multimedia", params);
+          (macro.children ||= []).push({
+            type: "element",
+            tagName: "ri:attachment",
+            properties: { "ri:filename": file },
+            children: [],
+            selfClosing: true,
+          });
+          replaceNode(parent, idx, macro);
+        }
+      },
+
+      /* <a> with Writerside anchor attribute */
+      "a": (el, parent, idx) => {
+        // unwrap <a><ac:image/></a> later too (keep here if already in tree)
         if (el.children && el.children.length === 1) {
           const only = el.children[0]!;
           if (only.type === "element" && (only as any).tagName === "ac:image") {
             parent.children!.splice(idx, 1, only);
+            return;
+          }
+        }
+        const p = el.properties || {};
+        const href = String(p.href ?? "");
+        const anchor = String(p.anchor ?? "");
+        if (anchor && href) {
+          p.href = `${href}#${anchor}`;
+          delete p.anchor;
+        } else if (anchor && !href) {
+          p.href = `#${anchor}`;
+          delete p.anchor;
+        }
+      },
+
+      /* Inline emphasis/format/code + UI helpers */
+      "emphasis": (el) => { el.tagName = "em"; },
+      "code": (_el) => { /* keep as <code> */ },
+      "format": (el) => {
+        const p = el.properties || {};
+        const styles = (String(p.style ?? "")).split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+        const css: string[] = [];
+        if (styles.includes("bold")) css.push("font-weight:bold");
+        if (styles.includes("italic")) css.push("font-style:italic");
+        if (styles.includes("subscript")) css.push("vertical-align:sub");
+        if (styles.includes("superscript")) css.push("vertical-align:super");
+        if (p.color) css.push(`color:${String(p.color)}`);
+        el.tagName = "span";
+        el.properties = { ...(el.properties || {}), style: css.join(";") };
+      },
+      "control": (el) => { el.tagName = "span"; el.properties = { ...(el.properties || {}), className: ["ws-control"] }; },
+      "path": (el) => { el.tagName = "code"; el.properties = { ...(el.properties || {}), className: ["ws-path"] }; },
+      "ui-path": (el) => { el.tagName = "span"; el.properties = { ...(el.properties || {}), className: ["ws-ui-path"] }; },
+
+      /* Admonitions → Confluence panel macros */
+      "note": (el, parent, idx) => {
+        const macro = acMacro("info", undefined, el.children || []);
+        replaceNode(parent, idx, macro);
+      },
+      "tip": (el, parent, idx) => {
+        const macro = acMacro("tip", undefined, el.children || []);
+        replaceNode(parent, idx, macro);
+      },
+      "warning": (el, parent, idx) => {
+        const macro = acMacro("warning", undefined, el.children || []);
+        replaceNode(parent, idx, macro);
+      },
+
+      /* Writerside <list> → ul/ol */
+      "list": (el) => {
+        const p = el.properties || {};
+        const type = String(p.type ?? "bullet").toLowerCase();
+        const columns = Number(p.columns ?? 0);
+        const start = p.start != null ? String(p.start) : undefined;
+
+        if (type === "decimal" || type.startsWith("alpha")) {
+          el.tagName = "ol";
+          const props: Record<string, any> = {};
+          if (start && isDigits(start)) props.start = start;
+          el.properties = props;
+        } else if (type === "none") {
+          el.tagName = "ul";
+          el.properties = { style: "list-style-type:none" };
+        } else {
+          el.tagName = "ul";
+        }
+        if (columns && Number.isFinite(columns) && columns > 1) {
+          const props = el.properties || (el.properties = {});
+          const style = String(props.style ?? "");
+          props.style = style ? `${style};column-count:${columns}` : `column-count:${columns}`;
+        }
+      },
+
+      /* Table enhancements */
+      "table": (el) => {
+        const p = el.properties || {};
+        const styleAttr = String(p.style ?? "header-row"); // default header-row per spec
+        const border = String(p.border ?? "true").toLowerCase() === "true";
+        const widthPx = normalizePx(p.width);
+        const fixed = String(p["column-width"] ?? "").toLowerCase() === "fixed";
+        const cellpadding = p.cellpadding != null ? String(p.cellpadding) : "";
+        const cellspacing = p.cellspacing != null ? String(p.cellspacing) : "";
+
+        // Map header-row/column/both
+        const rows = (el.children || []).filter((c) => c.type === "element" && (c as HNode).tagName === "tr") as HNode[];
+        if (rows.length) {
+          const firstRow = rows[0];
+          const headerRow = styleAttr === "header-row" || styleAttr === "both";
+          const headerCol = styleAttr === "header-column" || styleAttr === "both";
+          if (headerRow && firstRow.children) {
+            for (const c of firstRow.children) {
+              if (c.type === "element" && (c as HNode).tagName === "td") (c as HNode).tagName = "th";
+            }
+          }
+          if (headerCol) {
+            for (const r of rows) {
+              const first = (r.children || []).find((c) => c.type === "element" && ((c as HNode).tagName === "td" || (c as HNode).tagName === "th")) as HNode | undefined;
+              if (first) first.tagName = "th";
+            }
+          }
+        }
+
+        // Table styling
+        const css: string[] = [];
+        if (border) css.push("border-collapse:collapse");
+        if (widthPx) css.push(`width:${widthPx}px`);
+        if (fixed) css.push("table-layout:fixed");
+        if (cellspacing) css.push(`border-spacing:${cellspacing}px`);
+        if (css.length) (el.properties ||= {}).style = css.join(";");
+
+        // Cell padding
+        if (cellpadding) {
+          for (const r of rows) {
+            for (const c of r.children || []) {
+              if (c.type === "element" && ((c as HNode).tagName === "td" || (c as HNode).tagName === "th")) {
+                const cp = (c as HNode).properties ||= {};
+                const st = String(cp.style ?? "");
+                cp.style = st ? `${st};padding:${cellpadding}px` : `padding:${cellpadding}px`;
+              }
+            }
           }
         }
       },
 
-      del: (el) => {
+      /* <show-structure> influences TOC injection (depth) */
+      "show-structure": (el, parent, idx) => {
+        const p = el.properties || {};
+        const depth = Number(p.depth ?? defaultTocMaxLevel);
+        if (Number.isFinite(depth) && depth > 0) {
+          state.requestedToc = true;
+          state.requestedTocDepth = depth;
+        }
+        // remove the directive node
+        parent.children!.splice(idx, 1);
+      },
+
+      /* Deprecated <anchor> → <span id="..."/> */
+      "anchor": (el, parent, idx) => {
+        const p = el.properties || {};
+        const name = String(p.name ?? "").trim();
+        const repl: HNode = { type: "element", tagName: "span", properties: { id: name }, children: [], selfClosing: true };
+        replaceNode(parent, idx, repl);
+      },
+
+      /* Icon behaves like small image attachment */
+      "icon": (el, parent, idx) => {
+        const p = el.properties || {};
+        const src = String(p.src ?? "").trim();
+        if (!src) return;
+        const ac = makeAcImageFromSrc(src, p.width, p.height, undefined, p.alt);
+        replaceNode(parent, idx, ac);
+      },
+
+      /* Inline frame → widget macro */
+      "inline-frame": (el, parent, idx) => {
+        const p = el.properties || {};
+        const src = String(p.src ?? "").trim();
+        if (!src) return;
+        const params: Record<string, string> = { url: src };
+        const w = normalizePx(p.width);
+        const h = normalizePx(p.height);
+        if (w) params.width = w;
+        if (h) params.height = h;
+        const macro = acMacro("widget", params);
+        replaceNode(parent, idx, macro);
+      },
+
+      /* math: fallback span with class (safe default) */
+      "math": (el) => {
+        el.tagName = "span";
+        const text = (el.children || []).map((c) => (c as any).value ?? "").join("");
+        el.children = [{ type: "text", value: String(text) }];
+        el.properties = { ...(el.properties || {}), className: ["ws-math-latex"] };
+      },
+
+      /* del → span with line-through (kept from original) */
+      "del": (el) => {
         const props = el.properties || {};
         el.tagName = "span";
         const style = String(props.style || "");
         el.properties = {
           ...props,
           style: style ? (style.includes("text-decoration") ? style : `${style};text-decoration:line-through;`)
-                       : "text-decoration:line-through;",
+            : "text-decoration:line-through;",
         };
       },
     };
+
+    /* ────────────── DFS visit ────────────── */
 
     function visit(node: HNode, parent: HNode | null, idx: number | null, inPre: boolean) {
       if (!node || node.type !== "element") return;
       const el = node;
       const tag = (el.tagName || "").toLowerCase();
-      const props = el.properties || (el.properties = {});
       const nextInPre = inPre || tag === "pre" || tag === "code";
+
+      // Record tag for filtered missing-tags report
+      if (FILTER_TAGS_UNION.has(tag)) encounteredFiltered.add(tag);
 
       if (!state.foundToc && hasTocMacro(el)) state.foundToc = true;
 
-      // Skip transforming <img> inside <pre>/<code>
-      if ((tag === "img") && nextInPre) {
-        // still normalize props below
-      } else {
+      // Skip transforming <img> inside <pre>/<code>, but still normalize props later
+      if (!(tag === "img" && nextInPre)) {
         const handler = handlers[tag];
         if (handler) handler(el, parent as HNode, idx as number);
       }
@@ -554,9 +899,17 @@ export default function rehypeConfluenceStorage(opts: RehypeConfluenceOptions = 
           else if (Array.isArray(val)) p[key] = val.join(" ");
         }
       }
+
+      // Unwrap <a><ac:image/></a> pattern (in case created after recursion)
+      if (tag === "a" && el.children && el.children.length === 1) {
+        const only = el.children[0]!;
+        if (only.type === "element" && (only as any).tagName === "ac:image" && parent && idx != null) {
+          (parent.children ||= [])[idx] = only;
+        }
+      }
     }
 
-    /* FIX: traverse *root children* (not the root node itself) */
+    /* Visit only root children (not the root node itself) */
     if (Array.isArray(tree.children)) {
       for (let i = 0; i < tree.children.length; i++) {
         visit(tree.children[i] as HNode, tree, i, /*inPre*/ false);
@@ -567,17 +920,18 @@ export default function rehypeConfluenceStorage(opts: RehypeConfluenceOptions = 
     const newRootChildren: HNode[] = [];
     for (const child of tree.children || []) {
       if (child && child.type === "element" &&
-          (child.tagName === "ac:image" || child.tagName === "confluence-image")) {
+        (child.tagName === "ac:image" || child.tagName === "confluence-image")) {
         newRootChildren.push({ type: "element", tagName: "p", properties: {}, children: [child] });
       } else {
         newRootChildren.push(child);
       }
     }
 
-    // TOC injection
+    // TOC injection (from options or <show-structure>)
     let wrappedChildren: HNode[] = [];
-    const shouldAddToc = insertToc && !state.foundToc;
-    const tocMacro = shouldAddToc ? buildTocMacro(tocMacroId, tocMaxLevel) : null;
+    const shouldAddToc = (insertToc || state.requestedToc) && !state.foundToc;
+    const tocMacro = shouldAddToc ? buildTocMacro(tocMacroId, state.requestedToc ? state.requestedTocDepth : defaultTocMaxLevel) : null;
+
     if (tocMacro && tocPosition === "after-first-h1") {
       let inserted = false;
       for (const c of newRootChildren) {
@@ -593,6 +947,7 @@ export default function rehypeConfluenceStorage(opts: RehypeConfluenceOptions = 
       wrappedChildren = newRootChildren;
     }
 
+    // Namespaces container
     tree.children = [{
       type: "element",
       tagName: "div",
@@ -602,5 +957,36 @@ export default function rehypeConfluenceStorage(opts: RehypeConfluenceOptions = 
       },
       children: wrappedChildren,
     }];
+
+    // ── Finalize & expose missing-tags report
+    const missingByGroup: Record<string, string[]> = {};
+    const missingFlatSet = new Set<string>();
+    for (const [group, tags] of Object.entries(FILTER_TAG_GROUPS)) {
+      const missing = tags.filter((t) => !encounteredFiltered.has(t));
+      if (missing.length) {
+        missingByGroup[group] = [...missing].sort();
+        for (const t of missing) missingFlatSet.add(t);
+      }
+    }
+    const report: MissingTagsReport = {
+      encountered: [...encounteredFiltered].sort(),
+      missingByGroup,
+      missingFlat: [...missingFlatSet].sort(),
+    };
+    (tree as any).data ||= {};
+    (tree as any).data.confluenceMissingTags = report;
+
+    if (typeof opts.onMissingTags === "function") {
+      try { opts.onMissingTags(report); } catch { /* ignore */ }
+    }
+    if (opts.reportMissingTags) {
+      const missingCount = report.missingFlat.length;
+      if (missingCount > 0) {
+        console.warn(
+          `[rehype-confluence] Missing filtered tags (${missingCount}): ` +
+          report.missingFlat.join(", ")
+        );
+      }
+    }
   };
 }

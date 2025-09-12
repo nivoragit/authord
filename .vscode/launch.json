@@ -13,7 +13,7 @@
         "--base-url", "https://confluence.sumihiran.dev",
         "--basic-auth", "${input:basicAuth}",
         "--page-id", "163983",
-        "/Users/madushika/Downloads/docsmain2/docs"
+        "/Users/madushika/Downloads/docsmain/docs"
       ],
       "attachSimplePort": 9229,
       "cwd": "${workspaceFolder}",
