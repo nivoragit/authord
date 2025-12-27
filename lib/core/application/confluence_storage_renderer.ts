@@ -8,13 +8,13 @@
 
 import { unified } from "unified";
 import rehypeStringify from "rehype-stringify";
-import rehypeConfluenceStorage, { type RehypeConfluenceOptions } from "../plugins/rehype_confluence_storage.ts";
+import rehypeConfluenceStorage, { type RehypeConfluenceOptions } from "../../plugins/rehype_confluence_storage.ts";
 import type { IMarkdownTransformer } from "../ports/ports.ts";
 import type { Element as XEl } from "xast";
-import { asStorageXhtml, type StorageXhtml } from "../utils/types.ts";
-import { TopicXastToHast, type HastRoot } from "../topic/topic_to_hast.ts";
+import { asStorageXhtml, type StorageXhtml } from "../shared/types.ts";
+import { TopicXastToHast, type HastRoot } from "../../topic/topic_to_hast.ts";
 import { AuthordAst } from "./authord_ast_assembler.ts";
-import rehypeConfluenceMedia from "../plugins/rehype-confluence-media.ts";
+import rehypeConfluenceMedia from "../../plugins/rehype-confluence-media.ts";
 
 export type PageRender = { path: string; media: "storage-xhtml"; xhtml: StorageXhtml };
 

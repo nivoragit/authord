@@ -27,13 +27,13 @@ Validates the project, converts Markdown to Confluence **storage XHTML**, render
 
 ## Quick start (Deno)
 
-#### Tasks quickstart
+#### Common commands
 
 - Install deps for editors/CI: `deno task setup:deps`
 - Type-check: `deno task check`
 - Lint: `deno task lint`
 - Format: `deno task fmt`
-- Test: `deno task test`
+- Test (unit + mocked integration; live tests are opt-in): `deno test tests/`
 - Build native binary: `deno task build`
 
 #### Compile & run as a native binary
@@ -55,7 +55,7 @@ chmod +x authord
   --basic-auth "<username>:<password-or-api-token>" \
   --page-id=<confluence-page-id> \
   /path/to/your/project
-````
+```
 
 ```bash
 # Alternative: run directly with Deno (no compilation)
@@ -70,25 +70,35 @@ deno run -A /path/to/authord/lib/cli.ts confluence-single \
 
 ---
 
+## Testing
+
+Unit + mocked integration tests (default, no real Confluence):
+
+```bash
+deno test tests/
+```
+
+Live Confluence integration tests (skipped by default; uses a real page):
+
+```bash
+AUTHORD_LIVE_TEST=1 \
+CONF_BASE_URL=https://<your-confluence-domain> \
+CONF_BASIC_AUTH="<username>:<password-or-api-token>" \
+CONF_TEST_PAGE_ID=<confluence-page-id> \
+deno test tests/integration/confluence_live_test.ts --allow-net --allow-env --allow-read --allow-write
+```
+
+To allow mutations, set `AUTHORD_LIVE_MUTATE=1`. For attachment uploads, set
+`AUTHORD_LIVE_ATTACH=1`. Use a disposable test page.
+
+---
+
 ## Build
 
 Compile to a native binary (no tasks required):
 
 ```bash
-deno compile -A -o bin/authord ./cli.ts
-```
-
-*(Optional)* If you prefer `deno task build`, add this to your `deno.jsonc`:
-
-```json
-{
-  "tasks": {
-    "build": "deno compile -A -o bin/authord ./cli.ts",
-    "check": "deno check ./cli.ts",
-    "setup:deps": "deno cache ./cli.ts",
-    "test": "deno test -A"
-  }
-}
+deno compile -A -o bin/authord lib/cli.ts
 ```
 
 ---
@@ -103,13 +113,18 @@ Arguments:
 
 Required:
   --base-url <url>              Confluence base URL
-  --basic-auth <user:pass>      API token (Bearer or "user:pass" for Basic)
-  -i, --page-id <id>            Existing Confluence page ID to update
+  --basic-auth <user:pass>      Confluence credentials (Bearer not supported)
+  --page-id <id>                Existing Confluence page ID to update
 
 Optional:
-  --title <t>                   Page title (defaults to current page title)
-  --md <dir>                    Topics directory (relative to [dir], default: topics)
-  --images <dir>                Images directory (relative to [dir], default: images)
+  --title <t>                   Page title override
+  --cfg <file>                  Explicit writerside.cfg (relative to [dir])
+  --md <fileOrDir...>           Fallback: one or more Markdown paths (relative to [dir])
+  -i, --images <dir>            Images directory (relative to [dir], default: images)
+  --no-toc                      Disable Confluence TOC macro
+  --heading-level <n>           Section heading level for each page (1-6)
+  --separators                  Insert <hr/> between sections
+  --allow-remote-xsd            Allow remote XSD fetch during validation
 ```
 
 > **No `--space` flag.** The tool updates an existing page via `--page-id`; it does not create pages in this flow.
@@ -170,6 +185,7 @@ images/
 
   Width/height accept values like `450` or `450px` (px is normalized away).
   Inline `<img>` tags are also supported.
+  Override the images directory with `--images` or `AUTHORD_IMAGE_DIR`.
 
 * **Mermaid**
   Fenced blocks with `mermaid` are rendered to **PNG** and attached:
@@ -183,8 +199,7 @@ images/
   Environment overrides recognized by the renderer:
 
   * `MMD_WIDTH`, `MMD_HEIGHT`, `MMD_SCALE`, `MMD_BG`
-  * `MMD_THEME`, `MMD_CONFIG`
-  * Work dir for diagram cache: `AUTHORD_WORK_DIR` (falls back to system temp)
+  * `MMD_THEME`, `MMD_CONFIG`, `MMD_BIN`
 
 * **Strike-through**
   Markdown `~~strike~~` is converted to an inline style compatible with Confluence Server/DC.
@@ -220,7 +235,7 @@ On errors, the CLI prints a per-file list and exits non-zero.
 ## Requirements
 
 * **Deno** installed (uses npm packages via Deno’s Node compatibility).
-* **Confluence DC/Server** reachable with a token (Bearer) or Basic credentials (`user:pass`).
+* **Confluence DC/Server** reachable with Basic credentials (`user:pass` or `user:api-token`).
 * **Mermaid CLI**
 
   * If `node_modules/.bin/mmdc` is not present, the tool will run `npx mmdc` automatically.
@@ -232,7 +247,7 @@ On errors, the CLI prints a per-file list and exits non-zero.
 
 ## Troubleshooting
 
-* **“Cannot find module …/utils/…”** – Update the imports in `confluence-single.ts` and `publish-single.ts` to point at the repo-root files (remove `utils/`), or move the files into a `utils/` folder.
+* **“Live tests are ignored”** – set `AUTHORD_LIVE_TEST=1` plus `CONF_BASE_URL`, `CONF_BASIC_AUTH`, `CONF_TEST_PAGE_ID`. Use `AUTHORD_LIVE_MUTATE=1` and `AUTHORD_LIVE_ATTACH=1` if you want mutations/uploads.
 * **“No project config found …”** – ensure `writerside.cfg` or `authord.config.json` exists in the target directory.
 * **Broken links/images** – check paths relative to the Markdown file or place shared assets under the configured `images` dir.
 * **Mermaid fails in CI** – install `@mermaid-js/mermaid-cli` locally and ensure headless Chrome can launch (the CLI already uses a non-interactive mode).
@@ -242,4 +257,3 @@ On errors, the CLI prints a per-file list and exits non-zero.
 ## License
 
 This project is licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)**.
-

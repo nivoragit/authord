@@ -1,6 +1,6 @@
 // xast_xml.test.ts
 import { assertEquals, assert } from "std/assert";
-import { parseXmlToXast, preSanitize } from "../../lib/domain/parse/xast_xml.ts";
+import { parseXmlToXast, preSanitize } from "../../lib/core/domain/parse/xast_xml.ts";
 
 Deno.test("strips xml decl and doctype", () => {
   const src = `<?xml version="1.0"?><!DOCTYPE topic SYSTEM "x.dtd"><topic id="t"><p>ok</p></topic>`;
@@ -319,5 +319,4 @@ Deno.test("sanitization is idempotent", () => {
   const twice = preSanitize(once);
   assertEquals(once, twice);
 });
-
 

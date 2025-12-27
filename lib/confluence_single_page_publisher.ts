@@ -15,13 +15,14 @@
  */
 
 import * as path from "node:path";
-import { ConfluenceStorageRenderer } from "./application/confluence_storage_renderer.ts";
-import { AuthordAstAssembler, type AuthordAst, type Resource } from "./application/authord_ast_assembler.ts";
-import { SinglePageComposer, SinglePageComposerOptions } from "./application/single_page_composer.ts";
-import type { IFileSystem, IMarkdownTransformer, IPageRepository, IAttachmentRepository, IPropertyStore } from "./ports/ports.ts";
-import { ConfluenceSync } from "./sync/confluence_sync.ts";
-import { PageId, Path as BrandPath, Path, ConfluenceCfg } from "./utils/types.ts";
-import { loadMacrosFromVars } from "./domain/parse/vars_parser.ts";
+import { ConfluenceStorageRenderer } from "./core/application/confluence_storage_renderer.ts";
+import { AuthordAstAssembler, type AuthordAst } from "./core/application/authord_ast_assembler.ts";
+import { SinglePageComposer, SinglePageComposerOptions } from "./core/application/single_page_composer.ts";
+import type { IFileSystem, IMarkdownTransformer, IPageRepository, IAttachmentRepository, IPropertyStore } from "./core/ports/ports.ts";
+import { ConfluenceSync } from "./core/application/confluence_sync.ts";
+import { PageId, Path as BrandPath, Path, ConfluenceCfg } from "./core/shared/types.ts";
+import type { Resource } from "./core/shared/resource.ts";
+import { loadMacrosFromVars } from "./core/domain/parse/vars_parser.ts";
 import { WritersideMarkdownTransformer } from "./writerside_markdown_transformer.ts";
 import { ConfluenceAttachmentRepository, ConfluencePageRepository, ConfluencePropertyStore } from "./confluence_api/confluence_repos.ts";
 import { makeLocalFirstCachingFetcher } from "./utils/schema_fetcher.ts";

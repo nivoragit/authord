@@ -6,7 +6,13 @@ import * as path from "node:path";
 export const PNG_MAGIC = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 /** Default image dir, overridable via AUTHORD_IMAGE_DIR env and setImageDir(). */
-export let IMAGE_DIR: string = Deno.env.get("AUTHORD_IMAGE_DIR") ?? "images";
+export let IMAGE_DIR: string = "images";
+try {
+  const envDir = Deno.env.get("AUTHORD_IMAGE_DIR");
+  if (envDir) IMAGE_DIR = envDir;
+} catch {
+  // Ignore env permission errors; default remains "images".
+}
 
 /** Update the global image directory (used by adapters/publishers). */
 // export function setImageDir(dir: string) {

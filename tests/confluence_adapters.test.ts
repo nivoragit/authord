@@ -1,9 +1,9 @@
 // Tests for Confluence adapters using a mocked AxiosInstance (no network).
 
 
-import type { ConfluenceCfg } from "../lib/utils/types.ts";
+import type { ConfluenceCfg } from "../lib/core/shared/types.ts";
 import type { AxiosInstance } from "axios";
-import { makeExportHash } from "../lib/domain/entities.ts";
+import { makeExportHash } from "../lib/core/domain/entities.ts";
 import { ConfluencePageRepository, ConfluencePropertyStore, ConfluenceAttachmentRepository } from "../lib/confluence_api/confluence_repos.ts";
 
 function makeCfg(): ConfluenceCfg {
@@ -171,9 +171,7 @@ Deno.test("PropertyStore get/set roundtrip (branded ExportHash)", async () => {
   }
 });
 
-Deno.test(
-  "AttachmentRepository list and ensure (create then update)",
-  async () => {
+Deno.test("AttachmentRepository list and ensure (create then update)", async () => {
     const cfg = makeCfg();
     const uploaded: string[] = [];
     let existingId: string | null = null;
@@ -227,29 +225,28 @@ Deno.test(
     const l0 = await repo.list("123" as any);
     if (l0.length !== 0) throw new Error("Expected no attachments initially");
 
-    // Ensure creates
-    const tmpDir = await Deno.makeTempDir({ prefix: "authord-attach-" });
-    const file = `${tmpDir}/pic.png`;
-    await Deno.writeFile(
-      file,
-      new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    );
-    const a1 = await repo.ensure("123" as any, file as any);
-    if (a1.fileName !== "pic.png") {
-      throw new Error("Attachment filename mismatch after ensure");
-    }
+    const realReadFile = Deno.readFile;
+    (Deno as any).readFile = async () =>
+      new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
-    const l1 = await repo.list("123" as any);
-    if (l1.length !== 1 || l1[0].fileName !== "pic.png") {
-      throw new Error("List after upload failed");
-    }
+    try {
+      const file = "/virtual/pic.png";
+      const a1 = await repo.ensure("123" as any, file as any);
+      if (a1.fileName !== "pic.png") {
+        throw new Error("Attachment filename mismatch after ensure");
+      }
 
-    // Ensure update path (same file again triggers update)
-    const a2 = await repo.ensure("123" as any, file as any);
-    if (a2.fileName !== "pic.png") {
-      throw new Error("Attachment filename mismatch on update");
-    }
+      const l1 = await repo.list("123" as any);
+      if (l1.length !== 1 || l1[0].fileName !== "pic.png") {
+        throw new Error("List after upload failed");
+      }
 
-    await Deno.remove(tmpDir, { recursive: true }).catch(() => {});
-  },
-);
+      // Ensure update path (same file again triggers update)
+      const a2 = await repo.ensure("123" as any, file as any);
+      if (a2.fileName !== "pic.png") {
+        throw new Error("Attachment filename mismatch on update");
+      }
+    } finally {
+      (Deno as any).readFile = realReadFile;
+    }
+});

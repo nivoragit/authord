@@ -42,7 +42,7 @@ function run(input: HRoot, opts?: Parameters<typeof rehypeConfluenceStorage>[0])
 }
 
 function findAll(node: any, predicate: (n: any) => boolean, acc: any[] = []): any[] {
-  if (node && node.type === "element" && predicate(node)) acc.push(node);
+  if (node && predicate(node)) acc.push(node);
   const kids = node && Array.isArray(node.children) ? node.children : [];
   for (const c of kids) findAll(c, predicate, acc);
   return acc;

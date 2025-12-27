@@ -1,5 +1,5 @@
 import { assert, assertThrows } from "std/assert";
-import { parseXmlToXast, preSanitize } from "../../lib/domain/parse/xast_xml.ts";
+import { parseXmlToXast, preSanitize } from "../../lib/core/domain/parse/xast_xml.ts";
 
 /** A trimmed but representative chunk of your sanitized XSD content */
 const XSD_SNIPPET = `<!--suppress XmlDefaultAttributeValue -->

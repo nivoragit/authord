@@ -7,7 +7,7 @@ import type {
   StorageXhtml,
   PageId,
   Path,
-} from "../utils/types.ts";
+} from "../shared/types.ts";
 import type { ExportHash } from "../domain/entities.ts";
 
 /** Validates a Writerside/Authord project structure & configuration. */

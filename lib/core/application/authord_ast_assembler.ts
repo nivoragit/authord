@@ -21,28 +21,16 @@
 
 import type { Element as XEl, ElementContent } from "xast";
 import { WritersideCfgParser } from "../domain/parse/cfg_parser.ts";
+import type { IRConfig } from "../domain/parse/cfg_parser.ts";
 import { InstanceProfileParser } from "../domain/parse/instance_profile_parser.ts";
 import { TopicParser } from "../domain/parse/topic_parser.ts";
 import { localName } from "../domain/parse/xast_xml.ts";
 import { buildXsdIndex } from "../domain/parse/xsd_index.ts";
 import { validateAgainstXsd } from "../domain/parse/xsd_validator.ts";
-import { Fetcher } from "../utils/schema_fetcher.ts";
+import type { Fetcher } from "../shared/fetcher.ts";
+import type { Resource } from "../shared/resource.ts";
 
 const PLACEHOLDER_RE = /%([A-Za-z][A-Za-z0-9._-]*)%/g;
-
-/** Resource abstraction (I/O is injected; no direct disk/network here). */
-export type Resource = {
-  readText: (pathOrUrl: string) => Promise<string>;
-  resolve: (base: string, target: string) => string;
-  exists: (pathOrUrl: string) => Promise<boolean>;
-};
-
-export interface IRConfig {
-  topicsDir: string;
-  snippetsDir: string;
-  imagesDir: { dir: string; webPath?: string };
-  instances: { src: string; webPath?: string }[];
-}
 
 /** Builder options */
 export type BuildDocsetOptions = {

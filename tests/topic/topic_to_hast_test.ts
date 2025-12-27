@@ -87,10 +87,9 @@ Deno.test("code-block props passthrough", async () => {
     ),
   ]);
   const html = await renderHtml(new TopicXastToHast().toHast(topic));
-  assertStringIncludes(html, `collapsed-title="More"`);
-  assertStringIncludes(html, `collapsible="true"`);
-  assertStringIncludes(html, `include-lines="1-3"`);
-  assertStringIncludes(html, `src="a.xml"`);
+  assertStringIncludes(html, `<ac:parameter ac:name="title">More</ac:parameter>`);
+  assertStringIncludes(html, `<ac:parameter ac:name="collapse">false</ac:parameter>`);
+  assertStringIncludes(html, `<ac:parameter ac:name="language">xml</ac:parameter>`);
   assertStringIncludes(html, "@@ATTACH|file=x.png|width=10@@");
 });
 

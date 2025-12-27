@@ -47,9 +47,18 @@ export function setCommandRunner(r: CommandRunner | null) {
   _runner = r ?? defaultRunner; // reset to default when null is passed
 }
 
+function safeEnvGet(name: string): string | undefined {
+  try {
+    const v = Deno.env.get(name);
+    return v ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Resolve a local mmdc binary if present. */
 async function resolveLocalMmdc(cwd: string): Promise<string | null> {
-  const envBin = Deno.env.get("MMD_BIN");
+  const envBin = safeEnvGet("MMD_BIN");
   if (envBin) {
     try {
       const st = await Deno.stat(path.resolve(cwd, envBin));
@@ -82,12 +91,12 @@ async function buildCommand(
 ): Promise<{ cmd: string[]; cwd: string }> {
   const cwd = opts.cwd ?? Deno.cwd();
 
-  const envWidth = Deno.env.get("MMD_WIDTH");
-  const envHeight = Deno.env.get("MMD_HEIGHT");
-  const envScale = Deno.env.get("MMD_SCALE");
-  const envBg = Deno.env.get("MMD_BG");
-  const envTheme = Deno.env.get("MMD_THEME");
-  const envConfig = Deno.env.get("MMD_CONFIG");
+  const envWidth = safeEnvGet("MMD_WIDTH");
+  const envHeight = safeEnvGet("MMD_HEIGHT");
+  const envScale = safeEnvGet("MMD_SCALE");
+  const envBg = safeEnvGet("MMD_BG");
+  const envTheme = safeEnvGet("MMD_THEME");
+  const envConfig = safeEnvGet("MMD_CONFIG");
 
   const width = opts.width ?? (envWidth ? Number(envWidth) : undefined);
   const height = opts.height ?? (envHeight ? Number(envHeight) : undefined);

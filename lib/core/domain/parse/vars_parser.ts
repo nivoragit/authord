@@ -1,6 +1,6 @@
 // deno-lint-ignore-file no-explicit-any
 import { XMLParser } from "fxp";
-import { Resource } from "../../application/authord_ast_assembler.ts";
+import type { Resource } from "../../shared/resource.ts";
 
 
 /** Parse a Writerside vars XML string into { [name]: value }. */

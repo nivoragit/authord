@@ -5,7 +5,7 @@ import {
   assert,
 } from "std/assert";
 import type { Element as XEl } from "xast";
-import { SinglePageComposer } from "../../lib/application/single_page_composer.ts";
+import { SinglePageComposer } from "../../lib/core/application/single_page_composer.ts";
 
 // ───────────── helpers ─────────────
 function xel(name: string, attrs: Record<string, unknown> = {}, children: any[] = []): XEl {

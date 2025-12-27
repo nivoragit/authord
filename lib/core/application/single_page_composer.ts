@@ -18,11 +18,11 @@
  *    via an injected resolver so paths remain project-specific.
  */
 
-import type { ConfluencePage } from "../sync/confluence_sync.ts";
+import type { ConfluencePage } from "./confluence_sync.ts";
 import type { Element as XEl } from "xast";
 import { ConfluenceStorageRenderer } from "./confluence_storage_renderer.ts";
 import type { IMarkdownTransformer } from "../ports/ports.ts";
-import { asStorageXhtml, type StorageXhtml, type Path } from "../utils/types.ts";
+import { asStorageXhtml, type StorageXhtml, type Path } from "../shared/types.ts";
 import { AuthordAst } from "./authord_ast_assembler.ts";
 
 export type AttachmentResolution = {

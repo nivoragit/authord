@@ -1,5 +1,5 @@
 // schema_fetcher.ts
-export type Fetcher = (url: string) => Promise<string>;
+import type { Fetcher } from "../core/shared/fetcher.ts";
 
 type CacheMap = Record<string, string>; // url -> local filepath
 

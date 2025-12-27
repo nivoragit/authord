@@ -17,8 +17,8 @@ import rehypeStringify from "rehype-stringify";
 import remarkConfluenceMedia from "./plugins/remark_confluence_media.ts";
 import rehypeConfluenceStorage from "./plugins/rehype_confluence_storage.ts";
 
-import type { IMarkdownTransformer } from "./ports/ports.ts";
-import { asStorageXhtml, type StorageXhtml } from "./utils/types.ts";
+import type { IMarkdownTransformer } from "./core/ports/ports.ts";
+import { asStorageXhtml, type StorageXhtml } from "./core/shared/types.ts";
 
 export class WritersideMarkdownTransformer implements IMarkdownTransformer {
   constructor(private imagesDir: string) {}

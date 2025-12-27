@@ -3,8 +3,7 @@
 // import type { Element as XEl } from "npm:xast@2.0.0";
 import type { Element as XEl } from "xast";
 import { parseXmlToXast, getRootElement, localName } from "./xast_xml.ts";
-
-export type Fetcher = (url: string) => Promise<string>;
+import type { Fetcher } from "../../shared/fetcher.ts";
 
 export abstract class Parser<TOut, TIndex> {
   /** The local name we expect for the document root. */

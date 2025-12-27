@@ -8,6 +8,24 @@ import {
 import { setCommandRunner, renderMermaidDefinitionToFile } from "../lib/utils/mermaid.ts";
 import * as path from "node:path";
 
+async function withDenoOverrides<T>(
+  overrides: Record<string, unknown>,
+  fn: () => Promise<T> | T,
+): Promise<T> {
+  const original: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(overrides)) {
+    original[key] = (Deno as any)[key];
+    (Deno as any)[key] = value;
+  }
+  try {
+    return await fn();
+  } finally {
+    for (const [key, value] of Object.entries(original)) {
+      (Deno as any)[key] = value;
+    }
+  }
+}
+
 Deno.test("images: hashString is deterministic and hex length 8", () => {
   const a = hashString("hello");
   const b = hashString("hello");
@@ -18,21 +36,21 @@ Deno.test("images: hashString is deterministic and hex length 8", () => {
 });
 
 Deno.test("images: isPngFileOK detects PNG by magic", async () => {
-  const tmpDir = await Deno.makeTempDir({ prefix: "authord-png-" });
-  try {
-    const p = path.resolve(tmpDir, "x.png");
-    const f = await Deno.open(p, { write: true, create: true });
-    try {
-      await f.write(PNG_MAGIC);
-      await f.write(new Uint8Array([0, 0, 0, 0])); // pad
-    } finally {
-      f.close();
-    }
-    const ok = await isPngFileOK(p);
-    if (!ok) throw new Error("Expected PNG to be OK");
-  } finally {
-    await Deno.remove(tmpDir, { recursive: true }).catch(() => {});
-  }
+  await withDenoOverrides(
+    {
+      open: async () => ({
+        read: async (buf: Uint8Array) => {
+          buf.set(PNG_MAGIC);
+          return PNG_MAGIC.length;
+        },
+        close: () => {},
+      }),
+    },
+    async () => {
+      const ok = await isPngFileOK("/virtual/x.png");
+      if (!ok) throw new Error("Expected PNG to be OK");
+    },
+  );
 });
 
 Deno.test("images: makeAttachmentStub builds Confluence storage XHTML", () => {
@@ -52,82 +70,76 @@ Deno.test("images: makeAttachmentStub builds Confluence storage XHTML", () => {
 // });
 
 Deno.test("mermaid: prefers local node_modules/.bin/mmdc", async () => {
-  const root = await Deno.makeTempDir({ prefix: "authord-mmdc-local-" });
-  const binDir = path.resolve(root, "node_modules/.bin");
-  await Deno.mkdir(binDir, { recursive: true });
-  const mmdcPath = path.resolve(binDir, "mmdc");
-  await Deno.writeTextFile(mmdcPath, "#!/bin/sh\necho local mmdc\n"); // dummy file
-
   let receivedCmd: string[] | null = null;
+  const cwd = "/virtual/project";
+  const mmdcPath = path.resolve(cwd, "node_modules/.bin/mmdc");
+  const outFile = path.resolve(cwd, "out.png");
 
   setCommandRunner(async (cmd) => {
     receivedCmd = cmd;
-    // simulate success and create the output PNG
-    const outIndex = cmd.findIndex((x) => x === "-o");
-    const outPath = outIndex >= 0 ? cmd[outIndex + 1] : null;
-    if (outPath) {
-      const f = await Deno.open(outPath, { write: true, create: true, truncate: true });
-      try {
-        await f.write(PNG_MAGIC);
-      } finally {
-        f.close();
-      }
-    }
     return { code: 0 };
   });
 
-  const outFile = path.resolve(root, "out.png");
-  await renderMermaidDefinitionToFile("graph TD; A-->B;", outFile, { cwd: root });
+  await withDenoOverrides(
+    {
+      makeTempFile: async () => "/virtual/tmp.mmd",
+      writeTextFile: async () => {},
+      mkdir: async () => {},
+      remove: async () => {},
+      stat: async (p: string) => {
+        if (p === mmdcPath || p === outFile) return { isFile: true };
+        throw new Error("ENOENT");
+      },
+    },
+    async () => {
+      await renderMermaidDefinitionToFile("graph TD; A-->B;", outFile, { cwd });
+    },
+  );
+
+  setCommandRunner(null);
 
   if (!receivedCmd) throw new Error("No command captured");
   const cmd = receivedCmd as string[];
-
   if (cmd[0] !== mmdcPath) {
     console.error("Command:", cmd);
     throw new Error("Expected local mmdc to be used");
   }
-
-  // sanity: produced file is a PNG
-  const ok = await isPngFileOK(outFile);
-  if (!ok) throw new Error("Output file not recognized as PNG");
-
-  // reset runner to default for other tests
-  setCommandRunner(null);
-  await Deno.remove(root, { recursive: true }).catch(() => {});
 });
 
-Deno.test("mermaid: falls back to `npx -y mmdc` and applies env options", async () => {
-  const root = await Deno.makeTempDir({ prefix: "authord-mmdc-npx-" });
+Deno.test("mermaid: falls back to `npx -y mmdc` and applies options", async () => {
   let receivedCmd: string[] | null = null;
-
-  // Set env options
-  const prevWidth = Deno.env.get("MMD_WIDTH");
-  const prevHeight = Deno.env.get("MMD_HEIGHT");
-  Deno.env.set("MMD_WIDTH", "500");
-  Deno.env.set("MMD_HEIGHT", "300");
+  const cwd = "/virtual/project";
+  const outFile = path.resolve(cwd, "diagram.png");
 
   setCommandRunner(async (cmd) => {
     receivedCmd = cmd;
-    // simulate success and create output PNG
-    const outIndex = cmd.findIndex((x) => x === "-o");
-    const outPath = outIndex >= 0 ? cmd[outIndex + 1] : null;
-    if (outPath) {
-      const f = await Deno.open(outPath, { write: true, create: true, truncate: true });
-      try {
-        await f.write(PNG_MAGIC);
-      } finally {
-        f.close();
-      }
-    }
     return { code: 0 };
   });
 
-  const outFile = path.resolve(root, "diagram.png");
-  await renderMermaidDefinitionToFile("flowchart LR; X-->Y;", outFile, { cwd: root });
+  await withDenoOverrides(
+    {
+      makeTempFile: async () => "/virtual/tmp.mmd",
+      writeTextFile: async () => {},
+      mkdir: async () => {},
+      remove: async () => {},
+      stat: async (p: string) => {
+        if (p === outFile) return { isFile: true };
+        throw new Error("ENOENT");
+      },
+    },
+    async () => {
+      await renderMermaidDefinitionToFile("flowchart LR; X-->Y;", outFile, {
+        cwd,
+        width: 500,
+        height: 300,
+      });
+    },
+  );
+
+  setCommandRunner(null);
 
   if (!receivedCmd) throw new Error("No command captured");
   const cmd = receivedCmd as string[];
-
   if (cmd[0] !== "npx" || cmd[1] !== "-y" || cmd[2] !== "mmdc") {
     console.error("Command:", cmd);
     throw new Error("Expected npx -y mmdc fallback");
@@ -136,12 +148,6 @@ Deno.test("mermaid: falls back to `npx -y mmdc` and applies env options", async 
   const hasH = cmd.includes("-H") && cmd.includes("300");
   if (!hasW || !hasH) {
     console.error("Command:", cmd);
-    throw new Error("Expected width/height flags from env");
+    throw new Error("Expected width/height flags from options");
   }
-
-  // cleanup and reset
-  if (prevWidth == null) Deno.env.delete("MMD_WIDTH"); else Deno.env.set("MMD_WIDTH", prevWidth);
-  if (prevHeight == null) Deno.env.delete("MMD_HEIGHT"); else Deno.env.set("MMD_HEIGHT", prevHeight);
-  setCommandRunner(null);
-  await Deno.remove(root, { recursive: true }).catch(() => {});
 });

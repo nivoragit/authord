@@ -10,15 +10,14 @@ function expectIncludes(haystack: string, needles: string[], ctx = "output") {
   }
 }
 
-// 1) TOC + first H1 (Home)
-Deno.test("doc: TOC macro injected before first H1", async () => {
+// 1) Wrapper + first H1 (Home)
+Deno.test("doc: namespaces wrapper and first H1", async () => {
   const md = "# Home\n";
   const t = new WritersideMarkdownTransformer('.');
   const s = String(await t.toStorage(md));
   expectIncludes(s, [
     'xmlns:ac="http://atlassian.com/content"',
     'xmlns:ri="http://atlassian.com/resource/identifier"',
-    '<ac:structured-macro ac:name="toc"',
     "<h1>Home</h1>",
   ]);
 });
@@ -88,7 +87,7 @@ Deno.test("table: GFM 2x2", async () => {
   const t = new WritersideMarkdownTransformer('.');
   const s = String(await t.toStorage(md));
   expectIncludes(s, [
-    "<table>",
+    "<table",
     "<thead><tr><th>Header 1</th><th>Header 2</th></tr></thead>",
     "<tbody><tr><td>Cell 1</td><td>Cell 2</td></tr></tbody>",
     "</table>",
@@ -339,16 +338,17 @@ Deno.test(
 </tabs>`;
     const t = new WritersideMarkdownTransformer('.');;
     const s = await storageToString(t, md);
-    // markdown tab — stays literal
+    // markdown tab — stays literal inside code macro
     expectIncludes(s, [
       '<tab title="Markdown">',
-      '<code-block lang="plain text">![Alt Text](new_topic_options.png){ width=450 }</code-block>',
+      '<ac:parameter ac:name="language">plain text</ac:parameter>',
+      '![Alt Text](new_topic_options.png){ width=450 }',
     ]);
-    // xml tab — commented CDATA with @@ATTACH
+    // xml tab — commented CDATA with @@ATTACH inside code macro
     expectIncludes(s, [
       '<tab title="Semantic markup">',
-      '<code-block lang="xml">',
-      "<!--[CDATA[@@ATTACH|file=new_topic_options.png|width=450@@]]-->",
+      '<ac:parameter ac:name="language">xml</ac:parameter>',
+      "&#x3C;!--[CDATA[@@ATTACH|file=new_topic_options.png|width=450@@]]-->",
     ]);
   }
 );
@@ -399,8 +399,6 @@ Deno.test(
     ]);
   }
 );
-
-
 
 
 

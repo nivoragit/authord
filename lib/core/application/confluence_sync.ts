@@ -8,7 +8,7 @@ import type {
   StorageXhtml,
   PageId,
   Path,
-} from "../utils/types.ts";
+} from "../shared/types.ts";
 import type {
   IPageRepository,
   IAttachmentRepository,

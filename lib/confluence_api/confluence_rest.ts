@@ -1,7 +1,7 @@
 // lib/adapters/confluence-rest.ts
 import axios, { type AxiosError, type AxiosInstance } from "axios";
 import * as path from "node:path";
-import { type ConfluenceCfg } from "../utils/types.ts";
+import { type ConfluenceCfg } from "../core/shared/types.ts";
 import { Buffer } from "node:buffer";
 
 export const PROP_KEY_EXPORT_HASH = "authord:exportHash";

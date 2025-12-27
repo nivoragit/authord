@@ -5,7 +5,7 @@ import {
   assertExists,
   assertMatch,
 } from "std/assert";
-import { AuthordAstAssembler } from "../../lib/application/authord_ast_assembler.ts";
+import { AuthordAstAssembler } from "../../lib/core/application/authord_ast_assembler.ts";
 import { makeLocalFirstCachingFetcher } from "../../lib/utils/schema_fetcher.ts";
 
 
