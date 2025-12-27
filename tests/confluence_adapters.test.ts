@@ -1,13 +1,10 @@
 // Tests for Confluence adapters using a mocked AxiosInstance (no network).
 
-import {
-  ConfluencePageRepository,
-  ConfluenceAttachmentRepository,
-  ConfluencePropertyStore,
-} from "../lib/adapters/confluence-repos.ts";
+
 import type { ConfluenceCfg } from "../lib/utils/types.ts";
 import type { AxiosInstance } from "axios";
 import { makeExportHash } from "../lib/domain/entities.ts";
+import { ConfluencePageRepository, ConfluencePropertyStore, ConfluenceAttachmentRepository } from "../lib/confluence_api/confluence_repos.ts";
 
 function makeCfg(): ConfluenceCfg {
   return {

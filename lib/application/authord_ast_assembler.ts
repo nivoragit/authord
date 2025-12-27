@@ -26,9 +26,9 @@ import { TopicParser } from "../domain/parse/topic_parser.ts";
 import { localName } from "../domain/parse/xast_xml.ts";
 import { buildXsdIndex } from "../domain/parse/xsd_index.ts";
 import { validateAgainstXsd } from "../domain/parse/xsd_validator.ts";
+import { Fetcher } from "../utils/schema_fetcher.ts";
 
-const PLACEHOLDER_RE =  /%([A-Za-z][A-Za-z0-9._-]*)%/g;
-
+const PLACEHOLDER_RE = /%([A-Za-z][A-Za-z0-9._-]*)%/g;
 
 /** Resource abstraction (I/O is injected; no direct disk/network here). */
 export type Resource = {
@@ -36,7 +36,6 @@ export type Resource = {
   resolve: (base: string, target: string) => string;
   exists: (pathOrUrl: string) => Promise<boolean>;
 };
-
 
 export interface IRConfig {
   topicsDir: string;
@@ -54,6 +53,7 @@ export type BuildDocsetOptions = {
   maxIncludeDepth?: number;
   /** If true, allow fetching http(s) XSDs for final validation. Default: false. */
   allowRemoteSchemaFetch?: boolean;
+  fetcher: Fetcher;
 };
 
 /** Final composite AST (xast everywhere). */
@@ -77,11 +77,13 @@ export class AuthordAstAssembler {
     macros = {},
     fetchExternalCode = false,
     maxIncludeDepth = 12,
+    fetcher,
     allowRemoteSchemaFetch = false,
   }: BuildDocsetOptions): Promise<AuthordAst> {
+    
     // 1) Parse + validate cfg
     const cfgXmlRaw = await resource.readText(cfgFilePath);
-    const cfg = await this.writersideCfgParser.parse(cfgXmlRaw);  // todo move this to top layer
+    const cfg = await this.writersideCfgParser.parse(cfgXmlRaw, fetcher); // todo move this to top layer
     const topicsRootDir = resource.resolve(cfgFilePath, cfg.topicsDir);
 
     // 2) Parse instances + collect page refs
@@ -91,7 +93,7 @@ export class AuthordAstAssembler {
     for (const inst of cfg.instances) {
       const absInstancePath = resource.resolve(cfgFilePath, inst.src);
       const instanceXml = applyMacros(await resource.readText(absInstancePath), macros);
-      const instanceAst = await this.instanceProfileParser.parse(instanceXml);
+      const instanceAst = await this.instanceProfileParser.parse(instanceXml , fetcher);
       parsedInstances.push({ path: absInstancePath, ast: instanceAst });
       collectTopicPageRefsFromInstanceAst(instanceAst, (refPath) => {
         const absPagePath = resource.resolve(topicsRootDir, refPath);
@@ -103,13 +105,14 @@ export class AuthordAstAssembler {
     // 3) Parse top-level topic pages + preload transitive includes
     const topicAstByPath = new Map<string, XEl>();
     for (const p of topicPagePaths) {
-      topicAstByPath.set(p, await this.#parseTopicPage(resource, macros, p));
+      topicAstByPath.set(p, await this.#parseTopicPage(resource, macros, p, fetcher));
     }
     await this.#preloadIncludeTransitiveClosure({
       topicAstByPath,
       resource,
       macros,
       maxDepth: maxIncludeDepth,
+      fetcher,
     });
 
     // 4) Wrap Markdown
@@ -150,7 +153,9 @@ export class AuthordAstAssembler {
 
     // 7) Validate final resolved topic trees
     for (const [topicPath, topicAst] of topicAstByPath) {
-      await validateFinalResolvedTopicTree(topicAst, topicPath, resource, { allowRemoteSchemaFetch });
+      await validateFinalResolvedTopicTree(topicAst, topicPath, resource, {
+        allowRemoteSchemaFetch,
+      });
     }
 
     // 8) Assemble
@@ -160,9 +165,14 @@ export class AuthordAstAssembler {
     return { type: "docset", data: { cfg }, instances: parsedInstances, pages };
   }
 
-  async #parseTopicPage(resource: Resource, macros: Record<string, string>, absPath: string): Promise<XEl> {
+  async #parseTopicPage(
+    resource: Resource,
+    macros: Record<string, string>,
+    absPath: string,
+    fetcher: Fetcher,
+  ): Promise<XEl> {
     const xml = applyMacros(await resource.readText(absPath), macros);
-    const parsed = await this.topicPageParser.parse(xml);
+    const parsed = await this.topicPageParser.parse(xml,fetcher);
     const cloned: XEl = (globalThis as any).structuredClone
       ? (structuredClone as any)(parsed)
       : JSON.parse(JSON.stringify(parsed));
@@ -176,15 +186,18 @@ export class AuthordAstAssembler {
       resource,
       macros,
       maxDepth,
+      fetcher,
     }: {
       topicAstByPath: Map<string, XEl>;
       resource: Resource;
       macros: Record<string, string>;
       maxDepth: number;
+      fetcher: Fetcher;
     },
   ) {
-    const workQueue: Array<{ path: string; ast: XEl; depth: number }> =
-      [...topicAstByPath.entries()].map(([path, ast]) => ({ path, ast, depth: 0 }));
+    const workQueue: Array<{ path: string; ast: XEl; depth: number }> = [
+      ...topicAstByPath.entries(),
+    ].map(([path, ast]) => ({ path, ast, depth: 0 }));
     const visitedPaths = new Set<string>([...topicAstByPath.keys()]);
     while (workQueue.length) {
       const { path: currentTopicPath, ast: currentTopicAst, depth } = workQueue.pop()!;
@@ -194,7 +207,7 @@ export class AuthordAstAssembler {
         if (visitedPaths.has(absTargetPath)) continue;
         const exists = await resource.exists(absTargetPath);
         if (!exists) continue;
-        const parsedTarget = await this.#parseTopicPage(resource, macros, absTargetPath);
+        const parsedTarget = await this.#parseTopicPage(resource, macros, absTargetPath,fetcher);
         topicAstByPath.set(absTargetPath, parsedTarget);
         workQueue.push({ path: absTargetPath, ast: parsedTarget, depth: depth + 1 });
         visitedPaths.add(absTargetPath);
@@ -209,13 +222,12 @@ function applyMacros(text: string, macros: Record<string, string>): string {
   if (Object.keys(macros).length === 0) return text;
   return text.replace(PLACEHOLDER_RE, (_, key: string) => {
     if (!Object.prototype.hasOwnProperty.call(macros, key)) {
-      
       console.error(
         `[authord] error: no macro value provided for: ${key}\n` +
-        `→ To fix: open your v.list file and add:\n` +
-        `   <var name="${key}" value="YOUR_VALUE_HERE" />`
+          `→ To fix: open your v.list file and add:\n` +
+          `   <var name="${key}" value="YOUR_VALUE_HERE" />`,
       );
-      console.log(text) // todo remove
+      console.log(text); // todo remove
       throw new Error(`No macro value provided for: ${key}`);
     }
     return macros[key];
@@ -225,7 +237,7 @@ function applyMacros(text: string, macros: Record<string, string>): string {
 function collectTopicPageRefsFromInstanceAst(root: XEl, visit: (topicRelPath: string) => void) {
   walk(root, (el) => {
     if (localName(el.name) === "toc-element") {
-      const topicAttr = (el.attributes?.["topic"] as string | undefined);
+      const topicAttr = el.attributes?.["topic"] as string | undefined;
       if (topicAttr) visit(topicAttr);
     }
   });
@@ -270,7 +282,10 @@ function findParent(root: XEl, target: XEl): XEl | undefined {
   let parent: XEl | undefined;
   (function search(node: XEl) {
     for (const c of node.children) {
-      if (c === target) { parent = node; return; }
+      if (c === target) {
+        parent = node;
+        return;
+      }
       if (c.type === "element") search(c as XEl);
     }
   })(root);
@@ -301,7 +316,9 @@ async function resolveIncludeTransclusions({
   for (let pass = 0; pass < maxDepth; pass++) {
     let mutatedThisPass = false;
     const includeNodes: XEl[] = [];
-    walk(root, (el) => { if (localName(el.name) === "include") includeNodes.push(el); });
+    walk(root, (el) => {
+      if (localName(el.name) === "include") includeNodes.push(el);
+    });
     for (const includeEl of includeNodes) {
       const from = includeEl.attributes?.["from"] as string | undefined;
       const elementId = includeEl.attributes?.["element-id"] as string | undefined;
@@ -409,7 +426,11 @@ function urlBasename(u: string): string {
     return idx >= 0 ? u.slice(idx + 1) : u;
   }
 }
-async function tryReadLocalVendoredSchema(schemaUrl: string, topicAbsPath: string, resource: Resource) {
+async function tryReadLocalVendoredSchema(
+  schemaUrl: string,
+  topicAbsPath: string,
+  resource: Resource,
+) {
   const candidate = resource.resolve(topicAbsPath, urlBasename(schemaUrl));
   try {
     if (await resource.exists(candidate)) return await resource.readText(candidate);
@@ -456,7 +477,11 @@ async function validateFinalResolvedTopicTree(
     const index = buildXsdIndex(schemaText);
     validateAgainstXsd(root, "topic", index);
   } catch (e) {
-    console.warn(`[authord] warn: failed to read local schema '${schemaUrl}' for '${topicAbsPath}': ${String(e)}. Skipping validation.`);
+    console.warn(
+      `[authord] warn: failed to read local schema '${schemaUrl}' for '${topicAbsPath}': ${
+        String(e)
+      }. Skipping validation.`,
+    );
   }
 }
 

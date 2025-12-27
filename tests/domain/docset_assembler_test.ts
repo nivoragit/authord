@@ -6,6 +6,7 @@ import {
   assertMatch,
 } from "std/assert";
 import { AuthordAstAssembler } from "../../lib/application/authord_ast_assembler.ts";
+import { makeLocalFirstCachingFetcher } from "../../lib/utils/schema_fetcher.ts";
 
 
 /* ───────────────────────── helpers: tiny xast builders ─────────────────── */
@@ -17,6 +18,24 @@ type XEl = {
   attributes?: Record<string, string>;
   children: any[]; // ElementContent (keep light here)
 };
+
+const fetcher = makeLocalFirstCachingFetcher({
+  // todo: hardcoded paths; make configurable later?
+  cacheMap: {
+    "https://resources.jetbrains.com/writerside/1.0/writerside-cfg.xsd":
+      "cfg/schemas/writerside-cfg.xsd",
+    "https://resources.jetbrains.com/writerside/1.0/ihp.dtd":
+      "cfg/schemas/ihp.dtd",
+
+    // add others your project uses:
+    "https://resources.jetbrains.com/writerside/1.0/product-profile.dtd":
+      "cfg/schemas/instance-profile.dtd",
+
+    // "https://resources.jetbrains.com/writerside/1.0/topic.xsd":
+    //   "cfg/schemas/topic.xsd",
+  },
+  allowNetwork: true, // local-first; downloads if missing
+});
 
 const text = (v: string): Text => ({ type: "text", value: v });
 const el = (name: string, attrs: Record<string, string> = {}, children: any[] = []): XEl => ({
@@ -149,6 +168,7 @@ Deno.test("include: basic replacement injects referenced element's *content* (no
   const out = await assembler.build({
     cfgPath,
     resource: makeResource(files) as any,
+    fetcher,
   });
 
   // find page A
@@ -205,7 +225,7 @@ Deno.test("include: nullable=true removes unresolved include; non-nullable leave
     new FakeTopicParser(topicReg) as any,
   );
 
-  const out = await assembler.build({ cfgPath, resource: makeResource(files) as any });
+  const out = await assembler.build({ cfgPath, resource: makeResource(files) as any, fetcher });
 
   const pageA1 = out.pages.find((p:any) => p.path.endsWith("/A1.topic"))!;
   const pageA2 = out.pages.find((p:any) => p.path.endsWith("/A2.topic"))!;
@@ -252,7 +272,7 @@ Deno.test("include: multi-pass (fixed-point) resolves nested include brought in 
     new FakeTopicParser(topicReg) as any,
   );
 
-  const out = await assembler.build({ cfgPath, resource: makeResource(files) as any });
+  const out = await assembler.build({ cfgPath, resource: makeResource(files) as any , fetcher});
 
   const pageA = out.pages.find((p:any) => p.path.endsWith("/A.topic"))!;
   assertMatch(firstText(pageA.ast as any) ?? "", /Deep content/);
@@ -299,6 +319,7 @@ Deno.test("include: depth guard stops after maxIncludeDepth", async () => {
     cfgPath,
     resource: makeResource(files) as any,
     maxIncludeDepth: 1,
+    fetcher,
   });
 
   const pageA = out.pages.find((p:any) => p.path.endsWith("/A.topic"))!;
@@ -342,6 +363,7 @@ Deno.test("code-block: injects text; preserves non-text children; removes existi
   const out = await assembler.build({
     cfgPath,
     resource: makeResource(files) as any,
+    fetcher,
   });
 
   const pageA = out.pages.find((p:any) => p.path.endsWith("/A.topic"))!;
@@ -386,7 +408,7 @@ Deno.test("code-block: include-lines variants (single, open-range, comma list)",
     new FakeTopicParser(topicReg) as any,
   );
 
-  const out = await assembler.build({ cfgPath, resource: makeResource(files) as any });
+  const out = await assembler.build({ cfgPath, resource: makeResource(files) as any, fetcher });
 
   const cbs = findAll(out.pages[0].ast as any, "code-block");
 
@@ -419,7 +441,7 @@ Deno.test("markdown pages: are wrapped into <md-page> with content text", async 
     new FakeTopicParser(topicReg) as any, // no topics in this test
   );
 
-  const out = await assembler.build({ cfgPath, resource: makeResource(files) as any });
+  const out = await assembler.build({ cfgPath, resource: makeResource(files) as any , fetcher});
   const md = out.pages.find((p:any) => p.kind === "markdown")!;
   assertExists(md);
   assertEquals((md.ast as any).name, "md-page");
@@ -453,6 +475,7 @@ Deno.test("macros: applied to external code before injection", async () => {
     cfgPath,
     resource: makeResource(files) as any,
     macros: { FOO: "ZZ" },
+    fetcher,
   });
 
   const cb = findAll(out.pages[0].ast as any, "code-block")[0];
@@ -493,7 +516,7 @@ Deno.test("preload include closure: loads referenced topics transitively only if
     new FakeInstanceProfileParser(instAst) as any,
     new FakeTopicParser(topicReg) as any,
   );
-  const out1 = await asm1.build({ cfgPath, resource: makeResource(filesPresent) as any });
+  const out1 = await asm1.build({ cfgPath, resource: makeResource(filesPresent) as any, fetcher });
   assertMatch(firstText(out1.pages[0].ast as any) ?? "", /ok/);
 
   // Case 2: B missing => include cannot resolve (no nullable) -> include remains
@@ -502,7 +525,7 @@ Deno.test("preload include closure: loads referenced topics transitively only if
     new FakeInstanceProfileParser(instAst) as any,
     new FakeTopicParser(topicReg) as any,
   );
-  const out2 = await asm2.build({ cfgPath, resource: makeResource(filesMissingB) as any });
+  const out2 = await asm2.build({ cfgPath, resource: makeResource(filesMissingB) as any, fetcher });
   const unresolvedIncludes = findAll(out2.pages[0].ast as any, "include").length;
   assertEquals(unresolvedIncludes, 1);
 });

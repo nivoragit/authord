@@ -1,13 +1,7 @@
 // tests/adapters/confluence_rest_headers_test.ts
 import { assert, assertEquals, assertMatch } from "std/assert";
-import {
-  getPageWithVersion,
-  putPageStorage,
-  setRemoteHash,
-  getRemoteProperty,
-  listAttachments,
-  findAttachmentIdByName,
-} from "../../lib/adapters/confluence-rest.ts";
+import { getPageWithVersion, putPageStorage, setRemoteHash, listAttachments, findAttachmentIdByName } from "../../lib/confluence_api/confluence_rest.ts";
+
 
 type HeadersLike = Record<string, string>;
 type LastCall = { url: string; method: "get"|"put"|"post"; headers?: HeadersLike };

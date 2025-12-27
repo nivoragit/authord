@@ -24,6 +24,7 @@ import { PageId, Path as BrandPath, Path, ConfluenceCfg } from "./utils/types.ts
 import { loadMacrosFromVars } from "./domain/parse/vars_parser.ts";
 import { WritersideMarkdownTransformer } from "./writerside_markdown_transformer.ts";
 import { ConfluenceAttachmentRepository, ConfluencePageRepository, ConfluencePropertyStore } from "./confluence_api/confluence_repos.ts";
+import { makeLocalFirstCachingFetcher } from "./utils/schema_fetcher.ts";
 
 /* --------------------------- Option / Result types --------------------------- */
 
@@ -171,6 +172,18 @@ export class ConfluenceSinglePagePublisher {
   ): Promise<AuthordAst> {
     const resource = this.#makeResource(this.ports.fs);
     const macros = await loadMacrosFromVars(resource, cfgPath);
+    const fetcher = makeLocalFirstCachingFetcher({
+      // todo: hardcoded paths; make configurable later?
+      cacheMap: {
+        "https://resources.jetbrains.com/writerside/1.0/writerside-cfg.xsd":
+          "cfg/schemas/writerside-cfg.xsd",
+        "https://resources.jetbrains.com/writerside/1.0/ihp.dtd": "cfg/schemas/ihp.dtd",
+        // add others your project uses:
+        "https://resources.jetbrains.com/writerside/1.0/product-profile.dtd": "cfg/schemas/instance-profile.dtd",
+        // "https://resources.jetbrains.com/writerside/1.0/topic.xsd": "cfg/schemas/topic.xsd",
+      },
+      allowNetwork: true, // local-first; downloads if missing
+    });
 
     return await this.assembler.build({
       cfgPath,
@@ -179,6 +192,7 @@ export class ConfluenceSinglePagePublisher {
       fetchExternalCode: true,
       maxIncludeDepth: 20,
       allowRemoteSchemaFetch,
+      fetcher,
     });
     
   }

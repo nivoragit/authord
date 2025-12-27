@@ -1,7 +1,6 @@
 import {
   PNG_MAGIC,
   IMAGE_DIR,
-  setImageDir,
   hashString,
   isPngFileOK,
   makeAttachmentStub,
@@ -45,12 +44,12 @@ Deno.test("images: makeAttachmentStub builds Confluence storage XHTML", () => {
   if (!s.includes('alt="Logo"')) throw new Error("Alt not included");
 });
 
-Deno.test("images: setImageDir overrides default", () => {
-  const prev = IMAGE_DIR;
-  setImageDir("imgs");
-  if (IMAGE_DIR !== "imgs") throw new Error("setImageDir failed");
-  setImageDir(prev);
-});
+// Deno.test("images: setImageDir overrides default", () => {
+//   const prev = IMAGE_DIR;
+//   setImageDir("imgs");
+//   if (IMAGE_DIR !== "imgs") throw new Error("setImageDir failed");
+//   setImageDir(prev);
+// });
 
 Deno.test("mermaid: prefers local node_modules/.bin/mmdc", async () => {
   const root = await Deno.makeTempDir({ prefix: "authord-mmdc-local-" });

@@ -2,9 +2,9 @@
 import { assertStringIncludes } from "std/assert";
 import type { Element as XEl } from "xast";
 import type { IMarkdownTransformer } from "../../lib/ports/ports.ts";
-import { ConfluenceStorageRenderer } from "../../lib/application/confluence-storage-renderer.ts";
 import { unified } from "unified";
 import rehypeStringify from "rehype-stringify";
+import { ConfluenceStorageRenderer } from "../../lib/application/confluence_storage_renderer.ts";
 
 function xel(name: string, attrs: Record<string, unknown> = {}, children: any[] = []): XEl {
   return { type: "element", name, attributes: attrs, children } as unknown as XEl;
@@ -47,7 +47,7 @@ Deno.test("ConfluenceStorageRenderer: renders both topic and markdown pages", as
     ],
   };
 
-  const r = new ConfluenceStorageRenderer({ markdown: new FakeMarkdown() });
+  const r = new ConfluenceStorageRenderer({ markdown: new FakeMarkdown() },"");
   const pages = await r.renderDocset(docset as any);
 
   // topic page should become Storage XHTML with <h1>T</h1><p>Hello</p>
@@ -68,7 +68,7 @@ Deno.test("ConfluenceStorageRenderer: topic to AST (not string) API", async () =
     xel("image", { src: "z.png", width: 123 }, []),
   ]);
 
-  const r = new ConfluenceStorageRenderer({ markdown: new FakeMarkdown() });
+  const r = new ConfluenceStorageRenderer({ markdown: new FakeMarkdown() },"");
   const storageAst = await r.toStorageAstForTopic(topicAst);
 
   // After plugin, root children get wrapped in a single div with xmlns props
