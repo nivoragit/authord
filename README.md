@@ -36,13 +36,34 @@ Validates the project, converts Markdown to Confluence **storage XHTML**, render
 - Test: `deno task test`
 - Build native binary: `deno task build`
 
+#### Compile & run as a native binary
+
+If you prefer to compile the CLI once and then run a standalone binary:
+
 ```bash
+# Compile the CLI to a native binary
+deno compile -A \
+  --output authord \
+  /path/to/authord/lib/cli.ts
+
+# Make the binary executable (on Unix-like systems)
+chmod +x authord
+
+# Use the compiled binary instead of `deno run`
+./authord confluence-single \
+  --base-url=https://<your-confluence-domain> \
+  --basic-auth "<username>:<password-or-api-token>" \
+  --page-id=<confluence-page-id> \
+  /path/to/your/project
+````
+
+```bash
+# Alternative: run directly with Deno (no compilation)
 deno run -A /path/to/authord/lib/cli.ts confluence-single \
   --base-url=https://<your-confluence-domain> \
   --basic-auth="<username>:<password-or-api-token>" \
   --page-id=<confluence-page-id> \
-  /path/to/your/writerside
-
+  /path/to/your/project
 ```
 
 > The command detects the project type by the presence of **`writerside.cfg`** or **`authord.config.json`** in the provided directory, validates it, then publishes.
@@ -70,7 +91,7 @@ deno compile -A -o bin/authord ./cli.ts
 }
 ```
 
---- 
+---
 
 ## CLI
 
@@ -153,12 +174,11 @@ images/
 * **Mermaid**
   Fenced blocks with `mermaid` are rendered to **PNG** and attached:
 
-  ````
   ```mermaid
   graph LR
     A --> B
   ```
-  ````
+
 
   Environment overrides recognized by the renderer:
 
@@ -222,3 +242,4 @@ On errors, the CLI prints a per-file list and exits non-zero.
 ## License
 
 This project is licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)**.
+
