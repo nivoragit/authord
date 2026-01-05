@@ -1,10 +1,25 @@
 // xsd_validator.ts
 // Strictly validate xast AST against our XSD index (order + cardinality + common attribute constraints).
+// todo check xsd index is used, what are matched?
 import type { Element as XEl, Node } from "xast";
 import { localName } from "./xast_xml.ts";
 import type { XsdIndex, XsdElementDef, XsdParticle, Occurs } from "./xsd_index.ts";
 
 const IGNORED_ATTR_PREFIXES = ["xmlns", "xml:", "xsi:"];
+const COMPAT_ATTR_ALLOWLIST = new Map<string, Set<string>>([
+  ["topics", new Set(["web-path"])],
+  ["a", new Set(["type", "target"])],
+]);
+const RELAXED_CHILD_ORDER = new Set([
+  "topic",
+  "section-starting-page",
+  "links",
+  "snippet",
+]);
+
+function isCompatAttrAllowed(elName: string, attrName: string): boolean {
+  return COMPAT_ATTR_ALLOWLIST.get(elName)?.has(attrName) ?? false;
+}
 
 type ValidationError = { path: string; msg: string };
 
@@ -25,12 +40,12 @@ function walk(el: XEl, path: string, expectedRoot: string, xsd: XsdIndex, errors
     errors.push({ path: here, msg: `Root must be <${expectedRoot}>` });
   }
 
-  const def = xsd.elements.get(name);
+  const def = resolveElementDef(name, xsd);
   if (!def) {
     errors.push({ path: here, msg: `Element <${name}> not declared in XSD` });
   } else {
-    validateAttrs(el, def, here, errors);
-    validateChildren(el, def, here, xsd, errors);
+    validateAttrs(el, name, def, here, errors);
+    validateChildren(el, name, def, here, xsd, errors);
   }
 
   for (const k of childElements(el)) {
@@ -38,15 +53,15 @@ function walk(el: XEl, path: string, expectedRoot: string, xsd: XsdIndex, errors
   }
 }
 
-function validateAttrs(el: XEl, def: XsdElementDef, here: string, errors: ValidationError[]) {
+function validateAttrs(el: XEl, elementName: string, def: XsdElementDef, here: string, errors: ValidationError[]) {
   const attrsObj = el.attributes ?? {};
   const present = Object.keys(attrsObj).filter((a) => !IGNORED_ATTR_PREFIXES.some((p) => a.startsWith(p)));
 
   // unknown attributes
   if (!def.allowAnyAttribute) {
     for (const a of present) {
-      if (!def.attributes.has(a)) {
-        errors.push({ path: here, msg: `Unknown attribute "${a}" on <${def.name}>` });
+      if (!def.attributes.has(a) && !isCompatAttrAllowed(elementName, a)) {
+        errors.push({ path: here, msg: `Unknown attribute "${a}" on <${elementName}>` });
       }
     }
   }
@@ -54,14 +69,14 @@ function validateAttrs(el: XEl, def: XsdElementDef, here: string, errors: Valida
   // required attributes
   for (const [a, decl] of def.attributes) {
     if (decl.use === "required" && !(a in attrsObj)) {
-      errors.push({ path: here, msg: `Missing required attribute "${a}" on <${def.name}>` });
+      errors.push({ path: here, msg: `Missing required attribute "${a}" on <${elementName}>` });
     }
   }
 
   // enum/fixed checks
   for (const a of present) {
     const decl = def.attributes.get(a);
-    if (!decl) continue; // unknown allowed only if allowAnyAttribute
+    if (!decl) continue; // unknown allowed only if allowAnyAttribute or compat
 
     const value = String(attrsObj[a]);
 
@@ -74,22 +89,31 @@ function validateAttrs(el: XEl, def: XsdElementDef, here: string, errors: Valida
   }
 }
 
-function validateChildren(el: XEl, def: XsdElementDef, here: string, xsd: XsdIndex, errors: ValidationError[]) {
+function validateChildren(el: XEl, elementName: string, def: XsdElementDef, here: string, xsd: XsdIndex, errors: ValidationError[]) {
   const kids = childElements(el);
   const kidNames = kids.map((k) => localName(k.name));
+  const compatKidNames = filterCompatChildren(kidNames);
 
   const nonWsText = nonWhitespaceText(el);
   if (nonWsText && !def.mixed) {
-    errors.push({ path: here, msg: `<${def.name}> does not allow character data` });
+    errors.push({ path: here, msg: `<${elementName}> does not allow character data` });
   }
 
-  const ok = matchesParticle(def.content, kidNames, xsd);
-  if (!ok) {
-    errors.push({
-      path: here,
-      msg: `Child elements do not match XSD model: expected ${formatParticle(def.content)}, got (${kidNames.join(", ")})`,
-    });
+  const ok = matchesParticle(def.content, kidNames, xsd) ||
+    (compatKidNames !== kidNames && matchesParticle(def.content, compatKidNames, xsd));
+  if (ok) return;
+
+  if (RELAXED_CHILD_ORDER.has(elementName) && childrenAllowedBySet(def.allowedChildren, compatKidNames)) {
+    const counts = countChildren(compatKidNames);
+    if (requiredChildrenSatisfied(def.content, counts, xsd)) {
+      return;
+    }
   }
+
+  errors.push({
+    path: here,
+    msg: `Child elements do not match XSD model: expected ${formatParticle(def.content)}, got (${kidNames.join(", ")})`,
+  });
 }
 
 // -------------------------
@@ -106,6 +130,87 @@ function nonWhitespaceText(el: XEl): string | null {
     if ((t.value ?? "").trim() !== "") return t.value;
   }
   return null;
+}
+
+function resolveElementDef(name: string, xsd: XsdIndex): XsdElementDef | undefined {
+  const def = xsd.elements.get(name);
+  if (!def) return undefined;
+  const head = xsd.substitutionGroupFor.get(name);
+  if (!head) return def;
+  return xsd.elements.get(head) ?? def;
+}
+
+function matchesElementName(expected: string, actual: string, xsd: XsdIndex): boolean {
+  if (expected === actual) return true;
+  const subs = xsd.substitutionGroups.get(expected);
+  return subs ? subs.has(actual) : false;
+}
+
+function childrenAllowedBySet(
+  allowed: XsdElementDef["allowedChildren"],
+  kidNames: string[],
+): boolean {
+  if (allowed === "ANY") return true;
+  if (allowed === "EMPTY") return kidNames.length === 0;
+  return kidNames.every((n) => allowed.has(n));
+}
+
+function filterCompatChildren(kidNames: string[]): string[] {
+  const filtered = kidNames.filter((n) => n !== "include");
+  return filtered.length === kidNames.length ? kidNames : filtered;
+}
+
+function countChildren(kidNames: string[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const name of kidNames) {
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+  return counts;
+}
+
+function countForName(name: string, counts: Map<string, number>, xsd: XsdIndex): number {
+  let total = counts.get(name) ?? 0;
+  const subs = xsd.substitutionGroups.get(name);
+  if (subs) {
+    for (const s of subs) total += counts.get(s) ?? 0;
+  }
+  return total;
+}
+
+function requiredChildrenSatisfied(
+  particle: XsdParticle,
+  counts: Map<string, number>,
+  xsd: XsdIndex,
+): boolean {
+  switch (particle.kind) {
+    case "empty":
+    case "any":
+      return true;
+    case "element": {
+      const present = countForName(particle.name, counts, xsd);
+      return present >= particle.occurs.min;
+    }
+    case "sequence":
+    case "all": {
+      if (particle.occurs.min === 0) return true;
+      for (const item of particle.items) {
+        if (!requiredChildrenSatisfied(item, counts, xsd)) return false;
+      }
+      return true;
+    }
+    case "choice": {
+      if (particle.occurs.min === 0) return true;
+      return particle.items.some((item) => requiredChildrenSatisfied(item, counts, xsd));
+    }
+    case "groupRef": {
+      if (particle.occurs.min === 0) return true;
+      const group = xsd.groups.get(particle.ref);
+      if (!group) return true;
+      return requiredChildrenSatisfied(group, counts, xsd);
+    }
+    default:
+      return true;
+  }
 }
 
 // -------------------------
@@ -169,7 +274,7 @@ function matchOnce(node: XsdParticle, children: string[], pos: number, xsd: XsdI
       return [pos];
 
     case "element":
-      return (pos < children.length && children[pos] === node.name) ? [pos + 1] : [];
+      return (pos < children.length && matchesElementName(node.name, children[pos], xsd)) ? [pos + 1] : [];
 
     case "any":
       return (pos < children.length) ? [pos + 1] : [];

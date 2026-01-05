@@ -1,0 +1,8 @@
+{
+  "name": "@authord/render-core",
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./mod.ts"
+  }
+}

@@ -48,3 +48,18 @@ Deno.test("rehype_confluence_media: mermaid code-block -> confluence-image via o
   assertEquals(node.properties?.width, "400");
   assertEquals(node.properties?.alt, "M");
 });
+
+Deno.test("rehype_confluence_media: <img> inside code-block is left intact", async () => {
+  const tree = root([
+    el("code-block", {}, [
+      el("img", { src: "inside.png", width: "120" }),
+    ]),
+  ]);
+
+  await rehypeConfluenceMedia()(tree as any);
+
+  const code = (tree.children ?? [])[0] as any;
+  const img = (code.children ?? [])[0] as any;
+  assertEquals(img.tagName, "img");
+  assertEquals(img.properties?.src, "inside.png");
+});

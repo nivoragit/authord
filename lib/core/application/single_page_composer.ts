@@ -10,8 +10,8 @@
  *  - Fallback: docset.pages iteration order
  *
  * Notes:
- *  - We concatenate storage fragments as-is (each renderer output is already a valid
- *    Storage XHTML fragment). Confluence accepts multiple block-level roots.
+ *  - We concatenate storage fragments and rewrap them in a single namespace container
+ *    so <ac:*> and <ri:*> prefixes are always declared.
  *  - We do not parse/alter inner XHTML; we optionally prefix each section with a
  *    heading to aid navigation on a single large page.
  *  - Attachments are discovered by scanning for ri:attachment references and resolved
@@ -89,8 +89,11 @@ export class SinglePageComposer {
       // Optional per-section heading for the compounded page
       const headingBlock = `<${headingTag} id="${anchorIdFromPath(page.path)}">${escapeHtml(sectionTitle)}</${headingTag}>`;
 
-      // Concat: heading + original storage XHTML (already a fragment)
-      sections.push(`${headingBlock}\n${storageToString(html)}`);
+      const raw = storageToString(html);
+      const inner = stripNamespaceWrapper(raw);
+
+      // Concat: heading + original storage XHTML (inside namespace wrapper)
+      sections.push(`${headingBlock}\n${inner}`);
       if (insertSeparators) sections.push("<hr/>");
 
       // Find and resolve attachments referenced by this section and collect
@@ -109,8 +112,8 @@ export class SinglePageComposer {
       ? `<ac:structured-macro ac:name="toc" ac:schema-version="1" ac:macro-id="a854a720-dea6-4d0f-a0a2-e4591c07d85e"><ac:parameter ac:name="maxLevel">3</ac:parameter></ac:structured-macro>`
       : "";
 
-    const finalBody = `${tocMacro}\n${sections.join("\n")}`;
-    const storageHtml = asStorageXhtml(finalBody);
+    const finalInner = `${tocMacro}\n${sections.join("\n")}`;
+    const storageHtml = asStorageXhtml(wrapWithNamespace(finalInner));
 
     return {
       title,
@@ -196,6 +199,18 @@ function findAttachmentFilenames(storage: string): string[] {
 
 function storageToString(x: StorageXhtml): string {
   return (x as unknown as any).value ?? (x as unknown as string);
+}
+
+function stripNamespaceWrapper(html: string): string {
+  const m = /^<div\b[^>]*\bxmlns:ac="[^"]+"[^>]*\bxmlns:ri="[^"]+"[^>]*>/i.exec(html);
+  if (!m) return html;
+  if (!html.endsWith("</div>")) return html;
+  const openTag = m[0];
+  return html.slice(openTag.length, html.length - "</div>".length);
+}
+
+function wrapWithNamespace(inner: string): string {
+  return `<div xmlns:ac="http://atlassian.com/content" xmlns:ri="http://atlassian.com/resource/identifier">${inner}</div>`;
 }
 
 /* ───────────────────────────── small utils ───────────────────────────── */

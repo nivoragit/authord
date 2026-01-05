@@ -15,7 +15,9 @@ import rehypeRaw from "rehype-raw";
 import rehypeStringify from "rehype-stringify";
 
 import remarkConfluenceMedia from "./plugins/remark_confluence_media.ts";
+import remarkWritersideCustomElements from "./plugins/remark_writerside_custom_elements.ts";
 import rehypeConfluenceStorage from "./plugins/rehype_confluence_storage.ts";
+import rehypeEscapeCodeBlockRaw from "./plugins/rehype_escape_code_block_raw.ts";
 
 import type { IMarkdownTransformer } from "./core/ports/ports.ts";
 import { asStorageXhtml, type StorageXhtml } from "./core/shared/types.ts";
@@ -28,13 +30,16 @@ export class WritersideMarkdownTransformer implements IMarkdownTransformer {
       .use(remarkParse)
       .use(remarkGfm)
       .use(remarkDirective)
+      .use(remarkWritersideCustomElements)
       .use(remarkConfluenceMedia, {
         imagesDir: this.imagesDir,
         renderMermaid: true, 
+        htmlImgToAttach: false,
       })
       .use(remarkRehype, { allowDangerousHtml: true })
+      .use(rehypeEscapeCodeBlockRaw)
       .use(rehypeRaw)
-      .use(rehypeConfluenceStorage)
+      .use(rehypeConfluenceStorage, { imagesDir: this.imagesDir })
       .use(rehypeStringify, {
         allowDangerousHtml: true,
         closeSelfClosing: true,

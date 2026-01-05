@@ -38,7 +38,16 @@ class FakeMarkdown {
 
 // Extract the composed HTML string for assertions
 function asHtmlString(x: any): string {
-  return (x?.value ?? x) as string;
+  const s = (x?.value ?? x) as string;
+  return stripNamespaceWrapper(s);
+}
+
+function stripNamespaceWrapper(html: string): string {
+  const m = /^<div\b[^>]*\bxmlns:ac="[^"]+"[^>]*\bxmlns:ri="[^"]+"[^>]*>/i.exec(html);
+  if (!m) return html;
+  if (!html.endsWith("</div>")) return html;
+  const openTag = m[0];
+  return html.slice(openTag.length, html.length - "</div>".length);
 }
 
 // Count occurrences of a substring

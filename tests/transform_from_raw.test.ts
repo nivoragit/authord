@@ -178,8 +178,21 @@ Deno.test("image: width + border-effect → ac:image width + thumbnail", async (
   ]);
 });
 
-// 19) Procedure XML with inner <img …> → @@ATTACH
-Deno.test("xml: procedure inner image becomes @@ATTACH", async () => {
+// 18A) Markdown image with quoted attrs (thumbnail + width)
+Deno.test("image: thumbnail attr → ac:image width + thumbnail", async () => {
+  const md = "![Create new topic options](new_topic_options.png){ border-effect=\"line\" thumbnail=\"true\" width=\"321\"}";
+  const t = new WritersideMarkdownTransformer('.');
+  const s = String(await t.toStorage(md));
+  expectIncludes(s, [
+    "<ac:image",
+    'ri:filename="new_topic_options.png"',
+    'ac:width="321"',
+    'ac:thumbnail="true"',
+  ]);
+});
+
+// 19) Procedure XML with inner <img …> → ac:image inside list
+Deno.test("xml: procedure inner image becomes ac:image", async () => {
   const md =
 `<procedure title="Inject a procedure" id="inject-a-procedure">
     <step>
@@ -193,27 +206,39 @@ Deno.test("xml: procedure inner image becomes @@ATTACH", async () => {
   const t = new WritersideMarkdownTransformer('.');
   const s = String(await t.toStorage(md));
   expectIncludes(s, [
-    "<procedure title=\"Inject a procedure\" id=\"inject-a-procedure\">",
-    "@@ATTACH|file=completion_procedure.png@@",
-    "</procedure>",
+    '<h3 id="inject-a-procedure">Inject a procedure</h3>',
+    "<ol>",
+    'ri:filename="completion_procedure.png"',
+    "</ol>",
+  ]);
+  if (s.includes("@@ATTACH|file=completion_procedure.png")) {
+    throw new Error("Expected no @@ATTACH placeholder for procedure image");
+  }
+});
+
+
+// 21) Collapsible header → expand macro with body
+Deno.test("headers: collapsible suffix becomes expand macro", async () => {
+  const md = "#### Supplementary info {collapsible=\"true\"}\n\nContent under such header.";
+  const t = new WritersideMarkdownTransformer('.');
+  const s = String(await t.toStorage(md));
+  expectIncludes(s, [
+    'ac:name="expand"',
+    '<ac:parameter ac:name="title">Supplementary info</ac:parameter>',
+    "Content under such header.",
   ]);
 });
 
-
-// 21) Collapsible header literal suffix
-Deno.test("headers: collapsible suffix preserved literally", async () => {
-  const md = "#### Supplementary info {collapsible=\"true\"}";
-  const t = new WritersideMarkdownTransformer('.');
-  const s = String(await t.toStorage(md));
-  expectIncludes(s, ['<h4>Supplementary info {collapsible="true"}</h4>']);
-});
-
-// 22) Convert selection image → @@ATTACH with width
-Deno.test("xml-ish: convert selection image → @@ATTACH|width", async () => {
+// 22) Convert selection image → ac:image with width
+Deno.test("xml-ish: convert selection image → ac:image width", async () => {
   const md = '<img src="convert_table_to_xml.png" alt="Convert table to XML" width="706" border-effect="line"/>';
   const t = new WritersideMarkdownTransformer('.');
   const s = String(await t.toStorage(md));
-  expectIncludes(s, ["@@ATTACH|file=convert_table_to_xml.png|width=706@@"]);
+  expectIncludes(s, [
+    "<ac:image",
+    'ri:filename="convert_table_to_xml.png"',
+    'ac:width="706"',
+  ]);
 });
 
 // 23) Feedback/support links preserved
@@ -233,8 +258,8 @@ Email <a href="mailto:writerside@jetbrains.com">writerside@jetbrains.com</a>.`;
   ]);
 });
 
-// 24) Seealso block preserved
-Deno.test("seealso: category + links preserved", async () => {
+// 24) Seealso block rendered as heading + list
+Deno.test("seealso: links rendered as list items", async () => {
   const md =
 `<seealso>
     <category ref="wrs">
@@ -247,13 +272,13 @@ Deno.test("seealso: category + links preserved", async () => {
   const t = new WritersideMarkdownTransformer('.');
   const s = String(await t.toStorage(md));
   expectIncludes(s, [
-    "<seealso>",
-    '<category ref="wrs">',
+    "<h3>See also</h3>",
+    "<ul>",
     'href="https://www.jetbrains.com/help/writerside/markup-reference.html"',
     'href="https://www.jetbrains.com/help/writerside/manage-table-of-contents.html"',
     'href="https://www.jetbrains.com/help/writerside/local-build.html"',
     'href="https://www.jetbrains.com/help/writerside/configure-search.html"',
-    "</seealso>",
+    "</ul>",
   ]);
 });
 
@@ -323,9 +348,9 @@ Deno.test(
   }
 );
 
-// 20) Tabs: markdown code stays literal; xml tab emits @@ATTACH CDATA
+// 20) Tabs: markdown code stays literal; xml tab preserves literal markup
 Deno.test(
-  "tabs: markdown code keeps literal image; xml tab uses @@ATTACH in commented CDATA",
+  "tabs: markdown code keeps literal image; xml tab preserves literal markup",
   async () => {
     const md = `<tabs>
     <tab title="Markdown">
@@ -338,18 +363,40 @@ Deno.test(
 </tabs>`;
     const t = new WritersideMarkdownTransformer('.');;
     const s = await storageToString(t, md);
+    expectIncludes(s, ['ac:name="expand"']);
     // markdown tab — stays literal inside code macro
     expectIncludes(s, [
-      '<tab title="Markdown">',
+      '<ac:parameter ac:name="title">Markdown</ac:parameter>',
       '<ac:parameter ac:name="language">plain text</ac:parameter>',
-      '![Alt Text](new_topic_options.png){ width=450 }',
+      "<ac:plain-text-body><![CDATA[",
+      "![Alt Text](new_topic_options.png){ width=450 }",
+      "]]></ac:plain-text-body>",
     ]);
-    // xml tab — commented CDATA with @@ATTACH inside code macro
+    // xml tab — literal markup inside code macro
     expectIncludes(s, [
-      '<tab title="Semantic markup">',
+      '<ac:parameter ac:name="title">Semantic markup</ac:parameter>',
       '<ac:parameter ac:name="language">xml</ac:parameter>',
-      "&#x3C;!--[CDATA[@@ATTACH|file=new_topic_options.png|width=450@@]]-->",
+      "new_topic_options.png",
+      "Alt text",
     ]);
+    if (!s.includes("<ac:plain-text-body><![CDATA[")) {
+      throw new Error("Expected code macro to use CDATA for plain-text-body");
+    }
+    if (!s.includes("<![CDATA[<![CDATA[")) {
+      throw new Error("Expected literal CDATA opener to be preserved inside the code macro");
+    }
+    if (!s.includes("]]]]><![CDATA[>")) {
+      throw new Error("Expected CDATA close to be split to keep XML valid");
+    }
+    if (s.includes("]]&gt;")) {
+      throw new Error("Expected CDATA close not to be escaped in output");
+    }
+    if (s.includes("<!--[CDATA[")) {
+      throw new Error("Expected CDATA not to be rewritten as an HTML comment");
+    }
+    if (s.includes("@@ATTACH|file=")) {
+      throw new Error("Expected no @@ATTACH placeholder inside tabs code");
+    }
   }
 );
 // 26) Image trailing attrs: not parsed (current behavior); braces show as text
@@ -399,6 +446,3 @@ Deno.test(
     ]);
   }
 );
-
-
-

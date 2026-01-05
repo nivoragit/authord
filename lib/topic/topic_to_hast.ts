@@ -37,7 +37,7 @@ export class TopicXastToHast {
   #convertChildren(node: XEl, ctx: Ctx): HastNode[] {
     const out: HastNode[] = [];
     for (const c of node.children ?? []) {
-      if (c.type === "text") {
+      if (c.type === "text" || c.type === "cdata") {
         const v = (c as any).value ?? "";
         if (v !== "") out.push({ type: "text", value: String(v) });
         continue;
@@ -113,19 +113,28 @@ export class TopicXastToHast {
         case "del":
         case "strike": out.push(h("del", {}, this.#convertChildren(el, ctx))); break;
 
-        /* Admonitions */
+        /* Admonitions (preserve tag for downstream Confluence mapping) */
         case "note":
         case "tip":
         case "warning":
-        case "important": {
-          const cls = `admonition-${ln}`;
-          out.push(h("div", { className: cls }, this.#convertChildren(el, ctx)));
+        case "important":
+          out.push(h(ln, pickAll(el), this.#convertChildren(el, ctx)));
           break;
-        }
 
         /* Spotlight */
         case "spotlight":
           out.push(h("div", { className: "spotlight" }, this.#convertChildren(el, ctx)));
+          break;
+
+        /* Writerside structures preserved for downstream Confluence mapping */
+        case "procedure":
+        case "step":
+        case "tabs":
+        case "tab":
+        case "seealso":
+        case "category":
+        case "shortcut":
+          out.push(h(ln, pickAll(el), this.#convertChildren(el, ctx)));
           break;
 
         /* Lists */
@@ -219,6 +228,14 @@ function pick(el: XEl, keys: string[]): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const k of keys) {
     const v = el.attributes?.[k];
+    if (v != null && v !== "") out[k === "class" ? "className" : k] = v;
+  }
+  return out;
+}
+
+function pickAll(el: XEl): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(el.attributes ?? {})) {
     if (v != null && v !== "") out[k === "class" ? "className" : k] = v;
   }
   return out;

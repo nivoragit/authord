@@ -53,6 +53,8 @@ export type XsdIndex = {
   groups: Map<string, XsdParticle>;
   attributeGroups: Map<string, Map<string, XsdAttrDef>>;
   attributes: Map<string, XsdAttrDef>; // global attributes
+  substitutionGroups: Map<string, Set<string>>; // head -> members
+  substitutionGroupFor: Map<string, string>; // member -> head
 };
 
 function isEl(n: Node, ln?: string): n is XEl {
@@ -84,13 +86,27 @@ export function buildXsdIndex(xsdText: string): XsdIndex {
   const groupEls = new Map<string, XEl>();
   const attributeGroupEls = new Map<string, XEl>();
   const globalAttrEls = new Map<string, XEl>();
+  const substitutionGroups = new Map<string, Set<string>>();
+  const substitutionGroupFor = new Map<string, string>();
 
   for (const n of schema.children) {
     if (!isEl(n)) continue;
     const ln = localName(n.name);
     if (ln === "element") {
       const nm = attr(n, "name");
-      if (nm) globalElements.set(nm, n);
+      if (nm) {
+        globalElements.set(nm, n);
+        const sg = attr(n, "substitutionGroup");
+        if (sg) {
+          const head = localName(sg);
+          if (head) {
+            substitutionGroupFor.set(nm, head);
+            const members = substitutionGroups.get(head) ?? new Set<string>();
+            members.add(nm);
+            substitutionGroups.set(head, members);
+          }
+        }
+      }
     } else if (ln === "complexType") {
       const nm = attr(n, "name");
       if (nm) complexTypeEls.set(nm, n);
@@ -218,12 +234,141 @@ export function buildXsdIndex(xsdText: string): XsdIndex {
 
   for (const name of globalElements.keys()) resolveElementDefByName(name);
 
-  return { elements, complexTypes, groups, attributeGroups, attributes };
+  const index: XsdIndex = {
+    elements,
+    complexTypes,
+    groups,
+    attributeGroups,
+    attributes,
+    substitutionGroups,
+    substitutionGroupFor,
+  };
+  applyCompatibilityOverrides(index);
+  return index;
 }
 
 // -------------------------
 // Parsing: elements/types/particles
 // -------------------------
+
+function applyCompatibilityOverrides(index: XsdIndex): void {
+  applyWritersideCfgCompat(index);
+  applyWritersideTopicCompat(index);
+  expandAllowedChildrenForSubstitutions(index);
+}
+
+function applyWritersideCfgCompat(index: XsdIndex): void {
+  const ihp = index.elements.get("ihp");
+  if (!ihp) return;
+
+  // Writerside configs often omit api-specifications; relax it to be optional.
+  relaxElementMinOccurs(ihp.content, index.groups, new Set(["api-specifications"]));
+}
+
+function applyWritersideTopicCompat(index: XsdIndex): void {
+  const topic = index.elements.get("topic");
+  if (!topic) return;
+
+  // Writerside topic.v2.xsd requires include-in-head, but many projects omit it.
+  relaxElementMinOccurs(topic.content, index.groups, new Set(["include-in-head"]));
+
+  // Inline elements in Writerside schemas often allow text even when not marked mixed.
+  const inlineGroup = index.groups.get("InlineElements");
+  if (inlineGroup) {
+    const inlineNames = collectElementNamesFromParticle(inlineGroup, index.groups);
+    for (const name of inlineNames) {
+      const def = index.elements.get(name);
+      if (def && !def.mixed) def.mixed = true;
+    }
+  }
+
+  // Section groups allow spotlight without a title in real-world content.
+  const sectionGroup = index.elements.get("SectionGroupElementBase");
+  if (sectionGroup) {
+    relaxElementMinOccurs(sectionGroup.content, index.groups, new Set(["title"]));
+  }
+
+  // Snippets are often used for section-starting-page fragments like <spotlight>.
+  const snippet = index.elements.get("snippet");
+  if (snippet && snippet.allowedChildren !== "ANY" && snippet.allowedChildren !== "EMPTY") {
+    snippet.allowedChildren.add("spotlight");
+  }
+}
+
+function relaxElementMinOccurs(
+  p: XsdParticle,
+  groups: Map<string, XsdParticle>,
+  names: Set<string>,
+  seenGroups = new Set<string>(),
+): void {
+  switch (p.kind) {
+    case "element":
+      if (names.has(p.name) && p.occurs.min > 0) {
+        p.occurs = { min: 0, max: p.occurs.max };
+      }
+      return;
+    case "sequence":
+    case "choice":
+    case "all":
+      for (const it of p.items) relaxElementMinOccurs(it, groups, names, seenGroups);
+      return;
+    case "groupRef": {
+      if (seenGroups.has(p.ref)) return;
+      const nextSeen = new Set(seenGroups);
+      nextSeen.add(p.ref);
+      const g = groups.get(p.ref);
+      if (g) relaxElementMinOccurs(g, groups, names, nextSeen);
+      return;
+    }
+    case "empty":
+    case "any":
+      return;
+  }
+}
+
+function expandAllowedChildrenForSubstitutions(index: XsdIndex): void {
+  if (index.substitutionGroups.size === 0) return;
+  for (const def of index.elements.values()) {
+    if (def.allowedChildren === "ANY" || def.allowedChildren === "EMPTY") continue;
+    const extra = new Set<string>();
+    for (const name of def.allowedChildren) {
+      const subs = index.substitutionGroups.get(name);
+      if (!subs) continue;
+      for (const sub of subs) extra.add(sub);
+    }
+    if (extra.size === 0) continue;
+    for (const sub of extra) def.allowedChildren.add(sub);
+  }
+}
+
+function collectElementNamesFromParticle(
+  p: XsdParticle,
+  groups: Map<string, XsdParticle>,
+  names = new Set<string>(),
+  seenGroups = new Set<string>(),
+): Set<string> {
+  switch (p.kind) {
+    case "element":
+      names.add(p.name);
+      return names;
+    case "sequence":
+    case "choice":
+    case "all":
+      for (const it of p.items) collectElementNamesFromParticle(it, groups, names, seenGroups);
+      return names;
+    case "groupRef": {
+      if (seenGroups.has(p.ref)) return names;
+      const nextSeen = new Set(seenGroups);
+      nextSeen.add(p.ref);
+      const g = groups.get(p.ref);
+      if (g) collectElementNamesFromParticle(g, groups, names, nextSeen);
+      return names;
+    }
+    case "empty":
+    case "any":
+      return names;
+  }
+}
 
 function parseElementDef(el: XEl, ctx: {
   resolveComplexType: (name: string, seen?: Set<string>) => XsdComplexTypeDef;

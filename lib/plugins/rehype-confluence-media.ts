@@ -1,6 +1,5 @@
 // Deno + npm interop, HAST v3
 import type { Root, Element, Text, Properties, Content } from "hast";
-import { visit } from "unist-util-visit" ;
 import * as path from "node:path";
 import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
@@ -35,11 +34,6 @@ function normalizeSizePx(v?: string | number): string | undefined {
   const s = String(v).trim().toLowerCase();
   const m = s.match(/^(\d+)(px)?$/);
   return m ? m[1] : undefined;
-}
-function hasClass(el: Element, klass: string): boolean {
-  const v = el.properties?.className as unknown;
-  const list = Array.isArray(v) ? v : typeof v === "string" ? v.split(/\s+/) : [];
-  return list.includes(klass);
 }
 function dimsFromProps(props?: Properties): { width?: string; height?: string; alt?: string } {
   const out: { width?: string; height?: string; alt?: string } = {};
@@ -94,109 +88,33 @@ export default function rehypeConfluenceMedia(options: RehypeConfluenceMediaOpti
   } = options;
 
   return async function transformer(tree: Root) {
-    const tasks: Promise<void>[] = [];
+    type Parent = Root | Element;
+    type MermaidJob = { parent: Parent; index: number; codeText: string; order: number };
+
+    const mermaidJobs: MermaidJob[] = [];
     let mermaidIndex = 0;
 
-    // 1) Mermaid: <code-block lang="mermaid">...</code-block> → <confluence-image .../>
-visit(tree, "element", (node: Element, index, parent) => {
-  if (!parent || typeof index !== "number") return;
+    const extractMermaidText = (node: Element): string => {
+      const text = (node.children ?? [])
+        .filter((c): c is Text => c.type === "text" && typeof c.value === "string")
+        .map((c) => c.value)
+        .join("\n")
+        .trim();
+      return text;
+    };
 
-  if (node.tagName !== "code-block") return;
-  if (String(node.properties?.lang).toLowerCase() !== "mermaid") return;
+    const walk = (node: Root | Content, parent: Parent | null, index: number | null) => {
+      if (!node || typeof node !== "object") return;
 
-  // Extract code text (join all text children, in case of multiple lines)
-  const codeText = (node.children ?? [])
-    .filter((c): c is Text => c.type === "text" && typeof c.value === "string")
-    .map((c) => c.value)
-    .join("\n")
-    .trim();
-
-  if (!codeText || !renderMermaid) return;
-
-  const replaceWith = (content: Content) => {
-    (parent.children as Content[])[index] = content;
-  };
-
-  tasks.push((async () => {
-    let fileName: string | null = null;
-    let metaWidth: string | undefined;
-    let metaHeight: string | undefined;
-    let metaAlt: string | undefined;
-
-    if (options.onMermaid) {
-      const res = await options.onMermaid({ code: codeText, index: ++mermaidIndex });
-      fileName = basenameOf(res.filename);
-      metaWidth = normalizeSizePx(res.width ?? undefined);
-      metaHeight = normalizeSizePx(res.height ?? undefined);
-      if (res.alt) metaAlt = String(res.alt);
-    } else {
-      mermaidIndex++;
-    }
-
-    if (!fileName) {
-      const out = path.join(imagesDir, `${hashString("mermaid::" + codeText)}.png`);
-      let ok = false;
-      try {
-        ok = fs.existsSync(out) ? await (isPngFileOK as any)(out) : false;
-      } catch {
-        ok = false;
+      if (node.type === "root") {
+        const kids = (node.children ?? []) as Content[];
+        for (let i = 0; i < kids.length; i++) walk(kids[i]!, node, i);
+        return;
       }
 
-      if (!ok) {
-        try {
-          await renderMermaidDefinitionToFile(codeText, out, {
-            width: process.env.MMD_WIDTH ? Number(process.env.MMD_WIDTH) : undefined,
-            height: process.env.MMD_HEIGHT ? Number(process.env.MMD_HEIGHT) : undefined,
-            scale: process.env.MMD_SCALE ? Number(process.env.MMD_SCALE) : undefined,
-            backgroundColor: process.env.MMD_BG,
-            theme: process.env.MMD_THEME,
-            configFile: process.env.MMD_CONFIG,
-          } as Record<string, unknown>);
-          ok = await (isPngFileOK as any)(out);
-          if (!ok) throw new Error("bad png");
-        } catch {
-          try { if (fs.existsSync(out)) await fsp.unlink(out); } catch {}
-        }
-      }
-
-      if (ok) fileName = path.basename(out);
-    }
-
-    if (fileName) {
-      const meta = { alt: metaAlt, width: metaWidth, height: metaHeight };
-      if (emitMode === "html") {
-        replaceWith(rawNodeOfConfluenceImage(fileName, meta));
-      } else {
-        replaceWith(confluenceImageElement(fileName, meta));
-      }
-    }
-  })());
-});
-
-
-    // 2) <img src="..."> → <confluence-image filename="..."/>
-    visit(tree, "element", (node: Element, index, parent) => {
-      if (!parent || typeof index !== "number") return;
-      if (node.tagName !== "img" || !node.properties) return;
-
-      const src = String(node.properties.src ?? "");
-      if (!src) return;
-
-      const file = basenameOf(src);
-      const meta = dimsFromProps(node.properties);
-
-      if (emitMode === "html") {
-        (parent.children as Content[])[index] = rawNodeOfConfluenceImage(file, meta);
-      } else {
-        (parent.children as Content[])[index] = confluenceImageElement(file, meta);
-      }
-    });
-
-    // 3) Optional: raw HTML <img> (rare for topics). If requested, map to @@ATTACH
-    if (htmlImgToAttach) {
-      visit(tree, "raw", (node: any, index, parent) => {
-        if (!parent || typeof index !== "number") return;
-        const val = String(node.value ?? "");
+      if (node.type === "raw") {
+        if (!htmlImgToAttach || !parent || typeof index !== "number") return;
+        const val = String((node as any).value ?? "");
         if (!/<img\b/i.test(val)) return;
 
         // Very lightweight extraction (mirrors remark version behavior)
@@ -215,9 +133,103 @@ visit(tree, "element", (node: Element, index, parent) => {
         const file = basenameOf(src);
 
         (parent.children as Content[])[index] = attachStub(file, width, height);
-      });
-    }
+        return;
+      }
 
-    await Promise.all(tasks);
+      if (node.type !== "element") return;
+      const el = node;
+      const tag = String(el.tagName || "");
+
+      // 1) Mermaid: <code-block lang="mermaid">...</code-block> → <confluence-image .../>
+      if (tag === "code-block") {
+        if (renderMermaid && String(el.properties?.lang).toLowerCase() === "mermaid" && parent && typeof index === "number") {
+          const codeText = extractMermaidText(el);
+          if (codeText) mermaidJobs.push({ parent, index, codeText, order: ++mermaidIndex });
+        }
+        return; // Skip descending into code-blocks
+      }
+
+      // 2) <img src="..."> → <confluence-image filename="..."/>
+      if (tag === "img" && parent && typeof index === "number") {
+        if (!el.properties) return;
+        const src = String(el.properties.src ?? "");
+        if (!src) return;
+
+        const file = basenameOf(src);
+        const meta = dimsFromProps(el.properties);
+
+        if (emitMode === "html") {
+          (parent.children as Content[])[index] = rawNodeOfConfluenceImage(file, meta);
+        } else {
+          (parent.children as Content[])[index] = confluenceImageElement(file, meta);
+        }
+        return;
+      }
+
+      // Recurse
+      const kids = (el.children ?? []) as Content[];
+      for (let i = 0; i < kids.length; i++) walk(kids[i]!, el, i);
+    };
+
+    walk(tree, null, null);
+
+    if (mermaidJobs.length === 0) return;
+
+    const results = await Promise.all(mermaidJobs.map(async (job) => {
+      let fileName: string | null = null;
+      let metaWidth: string | undefined;
+      let metaHeight: string | undefined;
+      let metaAlt: string | undefined;
+
+      if (options.onMermaid) {
+        const res = await options.onMermaid({ code: job.codeText, index: job.order });
+        fileName = basenameOf(res.filename);
+        metaWidth = normalizeSizePx(res.width ?? undefined);
+        metaHeight = normalizeSizePx(res.height ?? undefined);
+        if (res.alt) metaAlt = String(res.alt);
+      }
+
+      if (!fileName) {
+        const out = path.join(imagesDir, `${hashString("mermaid::" + job.codeText)}.png`);
+        let ok = false;
+        try {
+          ok = fs.existsSync(out) ? await (isPngFileOK as any)(out) : false;
+        } catch {
+          ok = false;
+        }
+
+        if (!ok) {
+          try {
+            await renderMermaidDefinitionToFile(job.codeText, out, {
+              width: process.env.MMD_WIDTH ? Number(process.env.MMD_WIDTH) : undefined,
+              height: process.env.MMD_HEIGHT ? Number(process.env.MMD_HEIGHT) : undefined,
+              scale: process.env.MMD_SCALE ? Number(process.env.MMD_SCALE) : undefined,
+              backgroundColor: process.env.MMD_BG,
+              theme: process.env.MMD_THEME,
+              configFile: process.env.MMD_CONFIG,
+            } as Record<string, unknown>);
+            ok = await (isPngFileOK as any)(out);
+            if (!ok) throw new Error("bad png");
+          } catch {
+            try { if (fs.existsSync(out)) await fsp.unlink(out); } catch {}
+          }
+        }
+
+        if (ok) fileName = path.basename(out);
+      }
+
+      if (!fileName) return null;
+
+      const meta = { alt: metaAlt, width: metaWidth, height: metaHeight };
+      const content = (emitMode === "html")
+        ? rawNodeOfConfluenceImage(fileName, meta)
+        : confluenceImageElement(fileName, meta);
+      return { parent: job.parent, index: job.index, content };
+    }));
+
+    for (const res of results) {
+      if (!res) continue;
+      (res.parent.children as Content[])[res.index] = res.content;
+    }
   };
 }

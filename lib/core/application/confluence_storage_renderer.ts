@@ -15,6 +15,8 @@ import { asStorageXhtml, type StorageXhtml } from "../shared/types.ts";
 import { TopicXastToHast, type HastRoot } from "../../topic/topic_to_hast.ts";
 import { AuthordAst } from "./authord_ast_assembler.ts";
 import rehypeConfluenceMedia from "../../plugins/rehype-confluence-media.ts";
+import { preSanitize } from "../domain/parse/xast_xml.ts";
+import { log } from "node:console";
 
 export type PageRender = { path: string; media: "storage-xhtml"; xhtml: StorageXhtml };
 
@@ -46,6 +48,7 @@ export class ConfluenceStorageRenderer {
         out.push({ path: page.path, media: "storage-xhtml", xhtml });
       }
     }
+    // log(out) todo remove 
     return out;
   }
 
@@ -68,6 +71,10 @@ export class ConfluenceStorageRenderer {
   /** Topic XAST -> HAST transformed by rehype-confluence-storage (AST). */
   async toStorageAstForTopic(topic: XEl): Promise<HastRoot> {
     const initialHast = this.topicToHast.toHast(topic);
+    const rehypeOpts = { ...this.rehypeOpts };
+    if (!("imagesDir" in rehypeOpts) || !rehypeOpts.imagesDir) {
+      rehypeOpts.imagesDir = this.imagesDir;
+    }
     const proc = unified()
     // IMPORTANT: media first → creates <confluence-image> nodes
     .use(rehypeConfluenceMedia, {
@@ -76,7 +83,7 @@ export class ConfluenceStorageRenderer {
       // htmlImgToAttach: false,   // leave false for topics unless you really need stubs
     })
     // Then map HAST → Confluence Storage AST
-    .use(rehypeConfluenceStorage, this.rehypeOpts);
+    .use(rehypeConfluenceStorage, rehypeOpts);
     const transformed = await proc.run(initialHast as any);     // transform AST
     return transformed as HastRoot;
   }

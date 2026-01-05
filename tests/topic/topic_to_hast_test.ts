@@ -12,6 +12,9 @@ function xel(name: string, attrs: Record<string, unknown> = {}, children: any[] 
 function txt(v: string) {
   return { type: "text", value: v } as any;
 }
+function cdata(v: string) {
+  return { type: "cdata", value: v } as any;
+}
 
 async function renderHtml(hast: any) {
   const proc = unified()
@@ -90,7 +93,20 @@ Deno.test("code-block props passthrough", async () => {
   assertStringIncludes(html, `<ac:parameter ac:name="title">More</ac:parameter>`);
   assertStringIncludes(html, `<ac:parameter ac:name="collapse">false</ac:parameter>`);
   assertStringIncludes(html, `<ac:parameter ac:name="language">xml</ac:parameter>`);
-  assertStringIncludes(html, "@@ATTACH|file=x.png|width=10@@");
+  assertStringIncludes(html, "x.png");
+  if (html.includes("@@ATTACH|file=")) {
+    throw new Error("Expected no @@ATTACH placeholder in XML code block");
+  }
+});
+
+Deno.test("code-block preserves CDATA content", async () => {
+  const topic = xel("topic", {}, [
+    xel("code-block", { lang: "xml" }, [
+      cdata("<img src='x.png' width='10'/>"),
+    ]),
+  ]);
+  const html = await renderHtml(new TopicXastToHast().toHast(topic));
+  assertStringIncludes(html, "x.png");
 });
 
 Deno.test("images become ac:image downstream", async () => {

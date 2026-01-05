@@ -1,17 +1,17 @@
 // Shared image helpers (no network). Pure Deno FS + small utilities.
 
 import * as path from "node:path";
+import type { RenderRuntime } from "../core/shared/runtime.ts";
+import { readEnv, resolveRuntime } from "../core/shared/runtime.ts";
 
 /** PNG file signature (magic bytes) */
 export const PNG_MAGIC = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
-/** Default image dir, overridable via AUTHORD_IMAGE_DIR env and setImageDir(). */
-export let IMAGE_DIR: string = "images";
-try {
-  const envDir = Deno.env.get("AUTHORD_IMAGE_DIR");
-  if (envDir) IMAGE_DIR = envDir;
-} catch {
-  // Ignore env permission errors; default remains "images".
+/** Default image dir (override via runtime env or per-call options). */
+export const IMAGE_DIR: string = "images";
+
+export function getDefaultImageDir(rt?: RenderRuntime): string {
+  return readEnv("AUTHORD_IMAGE_DIR", rt) ?? IMAGE_DIR;
 }
 
 /** Update the global image directory (used by adapters/publishers). */
@@ -30,20 +30,17 @@ export function hashString(input: string): string {
 }
 
 /** Check whether a file looks like a valid PNG by magic header. */
-export async function isPngFileOK(filePath: string): Promise<boolean> {
+export async function isPngFileOK(filePath: string, rt?: RenderRuntime): Promise<boolean> {
   try {
-    const f = await Deno.open(filePath, { read: true });
-    try {
-      const buf = new Uint8Array(8);
-      const n = await f.read(buf);
-      if (n !== 8) return false;
-      for (let i = 0; i < 8; i++) {
-        if (buf[i] !== PNG_MAGIC[i]) return false;
-      }
-      return true;
-    } finally {
-      f.close();
+    const runtime = resolveRuntime(rt);
+    const readFile = runtime?.fs?.readFile;
+    if (!readFile) return false;
+    const buf = await readFile(filePath);
+    if (buf.length < 8) return false;
+    for (let i = 0; i < 8; i++) {
+      if (buf[i] !== PNG_MAGIC[i]) return false;
     }
+    return true;
   } catch {
     return false;
   }
@@ -74,7 +71,7 @@ export function makeAttachmentStub(
   if (width) attrs.push(`ac:width="${escapeAttr(width)}"`);
   if (height) attrs.push(`ac:height="${escapeAttr(height)}"`);
 
-  const altAttr = params?.alt ? ` alt="${escapeAttr(params.alt)}"` : "";
+  const altAttr = params?.alt ? ` ac:alt="${escapeAttr(params.alt)}" ac:title="${escapeAttr(params.alt)}"` : "";
 
   return `<ac:image${attrs.length ? " " + attrs.join(" ") : ""}${altAttr}><ri:attachment ri:filename="${escapeAttr(filename)}"/></ac:image>`;
 }

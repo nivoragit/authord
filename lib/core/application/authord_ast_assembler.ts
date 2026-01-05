@@ -474,7 +474,7 @@ async function validateFinalResolvedTopicTree(
 }
 
 /* ────────────── Markdown wrapper ─────────────── */
-function wrapMarkdownAsMdPageXast(markdown: string, path: string): XEl {
+export function wrapMarkdownAsMdPageXast(markdown: string, path: string): XEl {
   return {
     type: "element",
     name: "md-page",

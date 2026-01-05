@@ -4,6 +4,16 @@
 
 import * as path from "node:path";
 import { PNG_MAGIC } from "./images.ts";
+import {
+  type RenderRuntime,
+  type RunResult,
+  readEnv,
+  requireRenderRuntime,
+  resolveRuntime,
+} from "../core/shared/runtime.ts";
+
+const utf8 = new TextEncoder();
+const utf8Decoder = new TextDecoder();
 
 export interface MermaidRenderOptions {
   width?: number;
@@ -14,30 +24,22 @@ export interface MermaidRenderOptions {
   configFile?: string;
   /** Explicit mmdc binary path; if omitted, we auto-detect. */
   mmdcPath?: string;
-  /** Working directory for resolution/spawn (defaults to Deno.cwd()). */
+  /** Working directory for resolution/spawn (defaults to runtime cwd). */
   cwd?: string;
-}
-
-/** Command runner result */
-export interface RunResult {
-  code: number;
-  stdout?: Uint8Array;
-  stderr?: Uint8Array;
+  /** Optional runtime override for this call. */
+  runtime?: RenderRuntime;
 }
 
 /** Command runner signature */
 export type CommandRunner = (cmd: string[], opts?: { cwd?: string }) => Promise<RunResult>;
 
-/** Default runner using Deno.Command */
+/** Default runner uses the configured runtime exec. */
 const defaultRunner: CommandRunner = async (cmd, opts) => {
-  const proc = new Deno.Command(cmd[0], {
-    args: cmd.slice(1),
-    cwd: opts?.cwd,
-    stdout: "piped",
-    stderr: "piped",
-  }).spawn();
-  const { code, stdout, stderr } = await proc.output();
-  return { code, stdout, stderr };
+  const rt = requireRenderRuntime();
+  if (!rt.exec) {
+    throw new Error("Render runtime missing exec().");
+  }
+  return await rt.exec(cmd, opts);
 };
 
 let _runner: CommandRunner = defaultRunner;
@@ -47,22 +49,30 @@ export function setCommandRunner(r: CommandRunner | null) {
   _runner = r ?? defaultRunner; // reset to default when null is passed
 }
 
-function safeEnvGet(name: string): string | undefined {
-  try {
-    const v = Deno.env.get(name);
-    return v ?? undefined;
-  } catch {
-    return undefined;
+function requireRuntimeFromOpts(opts: MermaidRenderOptions): RenderRuntime {
+  const rt = resolveRuntime(opts.runtime);
+  if (!rt) {
+    throw new Error("Render runtime not set. Call setRenderRuntime() or pass opts.runtime.");
   }
+  return rt;
+}
+
+function safeEnvGet(name: string, rt: RenderRuntime): string | undefined {
+  return readEnv(name, rt);
+}
+
+async function existsFile(rt: RenderRuntime, filePath: string): Promise<boolean> {
+  const st = await rt.fs?.stat(filePath);
+  return Boolean(st?.isFile);
 }
 
 /** Resolve a local mmdc binary if present. */
-async function resolveLocalMmdc(cwd: string): Promise<string | null> {
-  const envBin = safeEnvGet("MMD_BIN");
+async function resolveLocalMmdc(cwd: string, rt: RenderRuntime): Promise<string | null> {
+  const envBin = safeEnvGet("MMD_BIN", rt);
   if (envBin) {
     try {
-      const st = await Deno.stat(path.resolve(cwd, envBin));
-      if (st.isFile) return path.resolve(cwd, envBin);
+      const p = path.resolve(cwd, envBin);
+      if (await existsFile(rt, p)) return p;
     } catch { /* ignore */ }
   }
 
@@ -74,8 +84,7 @@ async function resolveLocalMmdc(cwd: string): Promise<string | null> {
   for (const rel of candidates) {
     const p = path.resolve(cwd, rel);
     try {
-      const st = await Deno.stat(p);
-      if (st.isFile) return p;
+      if (await existsFile(rt, p)) return p;
     } catch {
       // continue
     }
@@ -89,14 +98,15 @@ async function buildCommand(
   outFile: string,
   opts: MermaidRenderOptions,
 ): Promise<{ cmd: string[]; cwd: string }> {
-  const cwd = opts.cwd ?? Deno.cwd();
+  const rt = requireRuntimeFromOpts(opts);
+  const cwd = opts.cwd ?? rt.cwd?.() ?? ".";
 
-  const envWidth = safeEnvGet("MMD_WIDTH");
-  const envHeight = safeEnvGet("MMD_HEIGHT");
-  const envScale = safeEnvGet("MMD_SCALE");
-  const envBg = safeEnvGet("MMD_BG");
-  const envTheme = safeEnvGet("MMD_THEME");
-  const envConfig = safeEnvGet("MMD_CONFIG");
+  const envWidth = safeEnvGet("MMD_WIDTH", rt);
+  const envHeight = safeEnvGet("MMD_HEIGHT", rt);
+  const envScale = safeEnvGet("MMD_SCALE", rt);
+  const envBg = safeEnvGet("MMD_BG", rt);
+  const envTheme = safeEnvGet("MMD_THEME", rt);
+  const envConfig = safeEnvGet("MMD_CONFIG", rt);
 
   const width = opts.width ?? (envWidth ? Number(envWidth) : undefined);
   const height = opts.height ?? (envHeight ? Number(envHeight) : undefined);
@@ -114,13 +124,21 @@ async function buildCommand(
   if (theme) args.push("-t", theme);
   if (config) args.push("-c", config);
 
-  const mmdc = opts.mmdcPath ?? await resolveLocalMmdc(cwd);
+  const mmdc = opts.mmdcPath ?? await resolveLocalMmdc(cwd, rt);
   if (mmdc) {
     return { cmd: [mmdc, ...args], cwd };
   }
 
   // Fall back to npx -y mmdc
   return { cmd: ["npx", "-y", "mmdc", ...args], cwd };
+}
+
+async function ensurePngExists(rt: RenderRuntime, outFile: string): Promise<void> {
+  if (await existsFile(rt, outFile)) return;
+  if (!rt.fs?.writeFile) {
+    throw new Error("Render runtime missing writeFile().");
+  }
+  await rt.fs.writeFile(outFile, PNG_MAGIC);
 }
 
 /**
@@ -132,35 +150,38 @@ export async function renderMermaidDefinitionToFile(
   outFile: string,
   opts: MermaidRenderOptions = {},
 ): Promise<string> {
+  const rt = requireRuntimeFromOpts(opts);
+  const fs = rt.fs;
+  if (!fs) throw new Error("Render runtime missing fs.");
+
   // Ensure out dir exists
-  await Deno.mkdir(path.dirname(outFile), { recursive: true });
+  await fs.mkdir(path.dirname(outFile), { recursive: true });
 
   // Prepare temp .mmd input
-  const tmpInput = await Deno.makeTempFile({ suffix: ".mmd" });
-  await Deno.writeTextFile(tmpInput, definition);
+  let tmpInput: string;
+  if (fs.makeTempFile) {
+    tmpInput = await fs.makeTempFile({ suffix: ".mmd" });
+  } else {
+    const base = rt.cwd?.() ?? ".";
+    tmpInput = path.join(base, `authord-${Date.now()}-${Math.random().toString(36).slice(2)}.mmd`);
+  }
+  await fs.writeFile(tmpInput, utf8.encode(definition));
 
   try {
     const { cmd, cwd } = await buildCommand(tmpInput, outFile, opts);
     const res = await _runner(cmd, { cwd });
     if (res.code !== 0) {
-      const stderr = res.stderr ? new TextDecoder().decode(res.stderr) : "";
+      const stderr = res.stderr ? utf8Decoder.decode(res.stderr) : "";
       throw new Error(`mmdc failed (code ${res.code}). ${stderr}`.trim());
     }
     // Optional sanity: ensure file exists; create a tiny placeholder if absent (some mock runners may skip writing)
-    try {
-      await Deno.stat(outFile);
-    } catch {
-      // Write a minimal PNG header so downstream checks can pass
-      const f = await Deno.open(outFile, { write: true, create: true, truncate: true });
-      try {
-        await f.write(PNG_MAGIC);
-      } finally {
-        f.close();
-      }
-    }
+    await ensurePngExists(rt, outFile);
     return outFile;
   } finally {
-    // cleanup temp file
-    await Deno.remove(tmpInput).catch(() => {});
+    try {
+      await fs.remove(tmpInput);
+    } catch {
+      // ignore cleanup errors
+    }
   }
 }

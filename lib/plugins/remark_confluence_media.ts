@@ -68,6 +68,26 @@ function normalizeSizePx(v?: string | number): string | undefined {
   const m = s.match(/^(\d+)(px)?$/);
   return m ? m[1] : undefined;
 }
+function stripQuotes(val: string): string {
+  if (val.length >= 2) {
+    const first = val[0];
+    const last = val[val.length - 1];
+    if ((first === "\"" && last === "\"") || (first === "'" && last === "'")) {
+      return val.slice(1, -1);
+    }
+  }
+  return val;
+}
+function truthyAttrValue(v: unknown): boolean {
+  if (v == null) return false;
+  if (typeof v === "boolean") return v;
+  if (typeof v === "number") return v !== 0;
+  if (typeof v === "string") {
+    const t = v.trim().toLowerCase();
+    return t !== "" && t !== "false" && t !== "0";
+  }
+  return true;
+}
 function parseAttrBlock(text: string): Record<string, string> | null {
   const t = text.trim();
   const m = t.match(/^\{([^}]*)\}$/);
@@ -78,9 +98,12 @@ function parseAttrBlock(text: string): Record<string, string> | null {
   const map: Record<string, string> = {};
   for (const kv of entries) {
     const mm = kv.match(/^([^:=]+)\s*[:=]\s*(.+)$/);
-    if (!mm) continue;
+    if (!mm) {
+      map[kv.toLowerCase()] = "true";
+      continue;
+    }
     const key = mm[1].trim().toLowerCase();
-    const val = mm[2].trim();
+    const val = stripQuotes(mm[2].trim());
     map[key] = val;
   }
   return map;
@@ -165,7 +188,14 @@ function paragraphOfImage(img: MdImage): Paragraph {
 }
 
 /** HAST custom element */
-function toConfluenceImageHast(img: MdImage, filename: string, alt?: string, width?: string, height?: string): void {
+function toConfluenceImageHast(
+  img: MdImage,
+  filename: string,
+  alt?: string,
+  width?: string,
+  height?: string,
+  extraProps?: Record<string, unknown>,
+): void {
   const n = img as WithHData;
   n.data ??= {};
   n.data.hName = "confluence-image";
@@ -173,6 +203,11 @@ function toConfluenceImageHast(img: MdImage, filename: string, alt?: string, wid
   if (alt) props.alt = alt;
   if (width) props.width = width;
   if (height) props.height = height;
+  if (extraProps) {
+    for (const [k, v] of Object.entries(extraProps)) {
+      if (v !== undefined) props[k] = v;
+    }
+  }
   n.data.hProperties = props;
 }
 
@@ -259,6 +294,7 @@ export default function remarkConfluenceMedia(options: RemarkConfluenceMediaOpti
 
       let width: string | undefined;
       let height: string | undefined;
+      let thumbnail: boolean | undefined;
 
       const collected = collectAttrBlockFromSiblings(kids, idx + 1);
       if (collected) {
@@ -266,6 +302,7 @@ export default function remarkConfluenceMedia(options: RemarkConfluenceMediaOpti
         if (attrs) {
           width = normalizeSizePx(attrs["width"]);
           height = normalizeSizePx(attrs["height"]);
+          if ("thumbnail" in attrs) thumbnail = truthyAttrValue(attrs["thumbnail"]);
           const removeCount = collected.removeTo - collected.removeFrom + 1;
           kids.splice(collected.removeFrom, removeCount);
         }
@@ -280,6 +317,7 @@ export default function remarkConfluenceMedia(options: RemarkConfluenceMediaOpti
               const h = normalizeSizePx(a["height"]);
               if (w) width = w;
               if (h) height = h;
+              if ("thumbnail" in a) thumbnail = truthyAttrValue(a["thumbnail"]);
             }
           }
           const remainder = v.slice(lead.consumed);
@@ -290,13 +328,15 @@ export default function remarkConfluenceMedia(options: RemarkConfluenceMediaOpti
           if (attrs && v[0] === "{") {
             width = normalizeSizePx(attrs["width"]);
             height = normalizeSizePx(attrs["height"]);
+            if ("thumbnail" in attrs) thumbnail = truthyAttrValue(attrs["thumbnail"]);
             kids.splice(idx + 1, 1);
           }
         }
       }
-      const dims: { width?: string; height?: string } = {};
+      const dims: { width?: string; height?: string; thumbnail?: boolean } = {};
       if (width) dims.width = width;
       if (height) dims.height = height;
+      if (thumbnail) dims.thumbnail = thumbnail;
       return dims;
     };
 
@@ -397,7 +437,8 @@ export default function remarkConfluenceMedia(options: RemarkConfluenceMediaOpti
           const dims = applyDimsFromSiblings(para, i);
           const filename = basenameOf((child as MdImage).url);
           const alt = (child as MdImage).alt ?? undefined;
-          toConfluenceImageHast(child as MdImage, filename, alt, dims.width, dims.height);
+          const extra = dims.thumbnail ? { thumbnail: true } : undefined;
+          toConfluenceImageHast(child as MdImage, filename, alt, dims.width, dims.height, extra);
         }
       }
 

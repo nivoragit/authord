@@ -34,10 +34,10 @@ const el = (tagName: string, props: Record<string, any> = {}, children: HNode[] 
 });
 const txt = (value: string): HNode => ({ type: "text", value });
 
-function run(input: HRoot, opts?: Parameters<typeof rehypeConfluenceStorage>[0]) {
+async function run(input: HRoot, opts?: Parameters<typeof rehypeConfluenceStorage>[0]) {
   const plugin = rehypeConfluenceStorage(opts);
   const tree = structuredClone(input) as HRoot;
-  plugin(tree);
+  await plugin(tree);
   return tree;
 }
 
@@ -55,6 +55,7 @@ function textContent(node: any): string {
   const walk = (n: any) => {
     if (!n) return;
     if (n.type === "text" && typeof n.value === "string") out.push(n.value);
+    if (n.type === "raw" && typeof n.value === "string") out.push(n.value);
     if (Array.isArray(n.children)) n.children.forEach(walk);
   };
   walk(node);
@@ -63,9 +64,9 @@ function textContent(node: any): string {
 
 /* -------------------- tests -------------------- */
 
-Deno.test("wraps top-level ac:image in <p> and converts <img> → <ac:image>", () => {
+Deno.test("converts <img> → <ac:image> without wrapping in <p>", async () => {
   const input = root([el("img", { src: "cat.png", width: "300", alt: "A cat" })]);
-  const tree = run(input);
+  const tree = await run(input);
 
   const nsDiv = findOne(tree, (n) => n.tagName === "div" && n.properties?.["xmlns:ac"]);
   assertExists(nsDiv);
@@ -74,7 +75,7 @@ Deno.test("wraps top-level ac:image in <p> and converts <img> → <ac:image>", (
   assertEquals(acImages.length, 1);
 
   const pWrappers = findAll(nsDiv, (n) => n.tagName === "p");
-  assertEquals(pWrappers.length, 1);
+  assertEquals(pWrappers.length, 0);
 
   const acProps = acImages[0].properties || {};
   assertEquals(acProps["ac:width"], "300");
@@ -84,24 +85,24 @@ Deno.test("wraps top-level ac:image in <p> and converts <img> → <ac:image>", (
   assertEquals(ri?.properties?.["ri:filename"], "cat.png");
 });
 
-Deno.test("consumes trailing {width=120} attr block after <img>", () => {
+Deno.test("consumes trailing {width=120} attr block after <img>", async () => {
   const input = root([
     el("img", { src: "dog.png" }),
     txt(" "),
     txt("{width=120}"),
   ]);
-  const tree = run(input);
+  const tree = await run(input);
   const acImage = findOne(tree, (n) => n.tagName === "ac:image");
   assertEquals(acImage?.properties?.["ac:width"], "120");
   assertEquals(acImage?.properties?.["ac:thumbnail"], "true");
 });
 
-Deno.test("<a href + anchor> → href#anchor and unwrap <a><ac:image/></a>", () => {
+Deno.test("<a href + anchor> → href#anchor and unwrap <a><ac:image/></a>", async () => {
   const input = root([
     el("a", { href: "t.topic", anchor: "sec" }, [txt("Link")]),
     el("a", {}, [el("img", { src: "x.png" })]),
   ]);
-  const tree = run(input);
+  const tree = await run(input);
 
   const link = findOne(tree, (n) => n.tagName === "a" && n.properties?.href === "t.topic#sec");
   assertExists(link);
@@ -114,8 +115,8 @@ Deno.test("<a href + anchor> → href#anchor and unwrap <a><ac:image/></a>", () 
   assertExists(ac);
 });
 
-Deno.test("<video> YouTube/Vimeo → widget; local → multimedia", () => {
-  const you = run(root([el("video", { src: "https://youtu.be/abc123", width: "640", height: "360" })]));
+Deno.test("<video> YouTube/Vimeo → widget; local → multimedia", async () => {
+  const you = await run(root([el("video", { src: "https://youtu.be/abc123", width: "640", height: "360" })]));
   const macroYou = findOne(you, (n) => n.tagName === "ac:structured-macro" && n.properties?.["ac:name"] === "widget");
   assertExists(macroYou);
   const youParams = findAll(macroYou, (n) => n.tagName === "ac:parameter");
@@ -125,52 +126,62 @@ Deno.test("<video> YouTube/Vimeo → widget; local → multimedia", () => {
   assertEquals(mapY.width, "640");
   assertEquals(mapY.height, "360");
 
-  const local = run(root([el("video", { src: "demo.mp4", width: "480" })]));
+  const local = await run(root([el("video", { src: "demo.mp4", width: "480" })]));
   const macroLocal = findOne(local, (n) => n.tagName === "ac:structured-macro" && n.properties?.["ac:name"] === "multimedia");
   assertExists(macroLocal);
   const att = findOne(macroLocal, (n) => n.tagName === "ri:attachment");
   assertEquals(att?.properties?.["ri:filename"], "demo.mp4");
 });
 
-Deno.test("<code-block lang='xml'> inlines CDATA and @@ATTACH tokens for <img>", () => {
+Deno.test("<code-block lang='xml'> preserves literal markup (no @@ATTACH rewrite)", async () => {
   const xmlLiteral = `<root><img src="icon.png" width="200"/></root>`;
   const input = root([
     el("code-block", { lang: "xml" }, [
       el("span", {}, [txt(xmlLiteral)]),
     ]),
   ]);
-  const tree = run(input);
+  const tree = await run(input);
   const codeMacro = findOne(tree, (n) => n.tagName === "ac:structured-macro" && n.properties?.["ac:name"] === "code");
   assertExists(codeMacro);
   const plain = findOne(codeMacro, (n) => n.tagName === "ac:plain-text-body");
   assertExists(plain);
   const t = textContent(plain);
-  assertStringIncludes(t, "<!--[CDATA[");
-  assertStringIncludes(t, "@@ATTACH|file=icon.png|width=200@@");
+  assertStringIncludes(t, "<root><img src=\"icon.png\" width=\"200\"/></root>");
+  assertEquals(t.includes("@@ATTACH|file="), false);
 });
 
-Deno.test("<compare> → 2-col table by default; vertical when type=top-bottom", () => {
-  const twoUp = run(root([
+Deno.test("<compare> → section/column layout; vertical when type=top-bottom", async () => {
+  const twoUp = await run(root([
     el("compare", {}, [
       el("code-block", { lang: "plain text" }, [txt("A")]),
       el("code-block", { lang: "plain text" }, [txt("B")]),
     ]),
   ]));
-  const table = findOne(twoUp, (n) => n.tagName === "table" && (n.properties?.className || []).includes("ws-compare"));
-  assertExists(table);
+  const section = findOne(twoUp, (n) => n.tagName === "ac:structured-macro" && n.properties?.["ac:name"] === "section");
+  assertExists(section);
+  const columns = findAll(section, (n) => n.tagName === "ac:structured-macro" && n.properties?.["ac:name"] === "column");
+  assertEquals(columns.length, 2);
+  const heads = findAll(section, (n) => n.tagName === "h4");
+  assertEquals(textContent(heads[0]), "Before");
+  assertEquals(textContent(heads[1]), "After");
 
-  const vertical = run(root([
+  const vertical = await run(root([
     el("compare", { type: "top-bottom", "title-before": "Old", "title-after": "New" }, [
       el("code-block", { lang: "plain text" }, [txt("X")]),
       el("code-block", { lang: "plain text" }, [txt("Y")]),
     ]),
   ]));
-  const container = findOne(vertical, (n) => n.tagName === "div" && (n.properties?.className || []).includes("ws-vertical"));
-  assertExists(container);
+  const sectionV = findOne(vertical, (n) => n.tagName === "ac:structured-macro" && n.properties?.["ac:name"] === "section");
+  assertExists(sectionV);
+  const columnsV = findAll(sectionV, (n) => n.tagName === "ac:structured-macro" && n.properties?.["ac:name"] === "column");
+  assertEquals(columnsV.length, 1);
+  const headsV = findAll(sectionV, (n) => n.tagName === "h4");
+  assertEquals(textContent(headsV[0]), "Old");
+  assertEquals(textContent(headsV[1]), "New");
 });
 
-Deno.test("<note>/<tip>/<warning> → Confluence panel macros", () => {
-  const tree = run(root([
+Deno.test("<note>/<tip>/<warning> → Confluence panel macros", async () => {
+  const tree = await run(root([
     el("note", {}, [txt("Hi")]),
     el("tip", {}, [txt("Pro")]),
     el("warning", {}, [txt("Careful")]),
@@ -181,20 +192,20 @@ Deno.test("<note>/<tip>/<warning> → Confluence panel macros", () => {
   assert(info && tip && warn);
 });
 
-Deno.test("<list> transforms: decimal/start, none style, columns", () => {
-  const ordered = run(root([
+Deno.test("<list> transforms: decimal/start, none style, columns", async () => {
+  const ordered = await run(root([
     el("list", { type: "decimal", start: "5" }, [el("li", {}, [el("p", {}, [txt("Item")])])]),
   ]));
   const ol = findOne(ordered, (n) => n.tagName === "ol");
   assertEquals(ol?.properties?.start, "5");
 
-  const none = run(root([
+  const none = await run(root([
     el("list", { type: "none" }, [el("li", {}, [el("p", {}, [txt("N")])])]),
   ]));
   const ul = findOne(none, (n) => n.tagName === "ul");
   assertStringIncludes(String(ul?.properties?.style || ""), "list-style-type:none");
 
-  const cols = run(root([
+  const cols = await run(root([
     el("list", { columns: "3" }, [
       el("li", {}, [el("p", {}, [txt("a")])]),
       el("li", {}, [el("p", {}, [txt("b")])]),
@@ -204,22 +215,22 @@ Deno.test("<list> transforms: decimal/start, none style, columns", () => {
   assertStringIncludes(String(ulCols?.properties?.style || ""), "column-count:3");
 });
 
-Deno.test("<table> header-row default: first row td → th", () => {
+Deno.test("<table> header-row default: first row td → th", async () => {
   const input = root([
     el("table", {}, [
       el("tr", {}, [el("td", {}, [txt("Col A")]), el("td", {}, [txt("Col B")])]),
       el("tr", {}, [el("td", {}, [txt("a1")]), el("td", {}, [txt("b1")])]),
     ]),
   ]);
-  const tree = run(input);
+  const tree = await run(input);
   const firstRow = findAll(tree, (n) => n.tagName === "tr")[0]!;
   const cells = (firstRow.children || []).filter((c: any) => c.type === "element");
   assertEquals(cells[0].tagName, "th");
   assertEquals(cells[1].tagName, "th");
 });
 
-Deno.test("inline UI/format tags mapping", () => {
-  const tree = run(root([
+Deno.test("inline UI/format tags mapping", async () => {
+  const tree = await run(root([
     el("emphasis", {}, [txt("i")]),
     el("format", { style: "bold", color: "Red" }, [txt("b")]),
     el("control", {}, [txt("OK")]),
@@ -237,8 +248,8 @@ Deno.test("inline UI/format tags mapping", () => {
   assert(control && pathNode && ui);
 });
 
-Deno.test("inserts TOC macro when <show-structure depth='2'/> and removes directive", () => {
-  const tree = run(root([
+Deno.test("inserts TOC macro when <show-structure depth='2'/> and removes directive", async () => {
+  const tree = await run(root([
     el("show-structure", { depth: "2" }),
     el("p", {}, [txt("Body")]),
   ]));
@@ -256,14 +267,47 @@ Deno.test("inserts TOC macro when <show-structure depth='2'/> and removes direct
   assertEquals(leftover, undefined);
 });
 
-Deno.test("<anchor name> → <span id=.../>", () => {
-  const tree = run(root([el("anchor", { name: "intro" })]));
+Deno.test("inserts last modified line after first h1 by default", async () => {
+  const tree = await run(
+    root([
+      el("h1", {}, [txt("Title")]),
+      el("p", {}, [txt("Body")]),
+    ]),
+    { lastModified: "1 Jan 2024" },
+  );
+  const container = findOne(tree, (n) => n.tagName === "div" && n.properties?.["xmlns:ac"]);
+  const kids = (container?.children || []) as HNode[];
+  const h1Idx = kids.findIndex((n) => n.tagName === "h1");
+  assertEquals(h1Idx >= 0, true);
+  const next = kids[h1Idx + 1];
+  assertEquals(next?.tagName, "p");
+  const em = findOne(next, (n) => n.tagName === "em");
+  assertEquals(textContent(em), "Last modified: 1 Jan 2024");
+});
+
+Deno.test("summary wrappers are removed or unwrapped", async () => {
+  const tree = await run(root([
+    el("link-summary", {}, [txt("Short link")]),
+    el("card-summary", {}, [txt("Short card")]),
+    el("tldr", {}, [el("p", {}, [txt("Scope")])]),
+    el("cards", {}, [el("title", {}, [txt("Card Title")])]),
+  ]));
+  assertEquals(findOne(tree, (n) => n.tagName === "link-summary"), undefined);
+  assertEquals(findOne(tree, (n) => n.tagName === "card-summary"), undefined);
+  assertEquals(findOne(tree, (n) => n.tagName === "tldr"), undefined);
+  assertEquals(findOne(tree, (n) => n.tagName === "cards"), undefined);
+  assertExists(findOne(tree, (n) => n.tagName === "p" && textContent(n) === "Scope"));
+  assertExists(findOne(tree, (n) => n.tagName === "title" && textContent(n) === "Card Title"));
+});
+
+Deno.test("<anchor name> → <span id=.../>", async () => {
+  const tree = await run(root([el("anchor", { name: "intro" })]));
   const span = findOne(tree, (n) => n.tagName === "span" && n.properties?.id === "intro");
   assertExists(span);
 });
 
-Deno.test("checkbox inputs → [x]/[ ] text", () => {
-  const tree = run(root([
+Deno.test("checkbox inputs → [x]/[ ] text", async () => {
+  const tree = await run(root([
     el("input", { type: "checkbox", checked: true }),
     txt(" "),
     el("input", { type: "checkbox" }),
@@ -274,21 +318,22 @@ Deno.test("checkbox inputs → [x]/[ ] text", () => {
   assertStringIncludes(blob, "[ ]");
 });
 
-Deno.test("unknown/missing semantic tags remain unchanged (<procedure>, <deflist>, <api-doc>)", () => {
-  const tree = run(root([
+Deno.test("procedure becomes heading + list; deflist becomes table", async () => {
+  const tree = await run(root([
     el("procedure", { title: "Do things" }, [el("step", {}, [txt("One")]), el("step", {}, [txt("Two")])]),
     el("deflist", {}, [el("def", { title: "Term" }, [txt("Definition")])]),
     el("api-doc", { "openapi-path": "openapi.yaml" }),
   ]));
-  assertExists(findOne(tree, (n) => n.tagName === "procedure"));
-  assertExists(findOne(tree, (n) => n.tagName === "step"));
-  assertExists(findOne(tree, (n) => n.tagName === "deflist"));
-  assertExists(findOne(tree, (n) => n.tagName === "def"));
+  assertExists(findOne(tree, (n) => n.tagName === "h3" && textContent(n) === "Do things"));
+  assertExists(findOne(tree, (n) => n.tagName === "ol"));
+  assertExists(findOne(tree, (n) => n.tagName === "li"));
+  assertExists(findOne(tree, (n) => n.tagName === "table"));
+  assertExists(findOne(tree, (n) => n.tagName === "th" && textContent(n) === "Term"));
   assertExists(findOne(tree, (n) => n.tagName === "api-doc"));
 });
 
-Deno.test("<inline-frame> → widget macro", () => {
-  const tree = run(root([el("inline-frame", { src: "https://example.com", width: "800", height: "400" })]));
+Deno.test("<inline-frame> → widget macro", async () => {
+  const tree = await run(root([el("inline-frame", { src: "https://example.com", width: "800", height: "400" })]));
   const macro = findOne(tree, (n) => n.tagName === "ac:structured-macro" && n.properties?.["ac:name"] === "widget");
   assertExists(macro);
   const params = findAll(macro, (n) => n.tagName === "ac:parameter");
@@ -299,18 +344,15 @@ Deno.test("<inline-frame> → widget macro", () => {
   assertEquals(map.height, "400");
 });
 
-Deno.test("<del> → span with line-through", () => {
-  const tree = run(root([el("del", {}, [txt("gone")])]));
+Deno.test("<del> → span with line-through", async () => {
+  const tree = await run(root([el("del", {}, [txt("gone")])]));
   const span = findOne(tree, (n) => n.tagName === "span");
   assertStringIncludes(String(span?.properties?.style || ""), "text-decoration:line-through");
 });
 
-Deno.test("<img border-effect=...> emits @@ATTACH token (text), not ac:image", () => {
-  const tree = run(root([el("img", { src: "a.png", width: "100", "border-effect": "line" })]));
+Deno.test("<img border-effect=...> still emits <ac:image>", async () => {
+  const tree = await run(root([el("img", { src: "a.png", width: "100", "border-effect": "line" })]));
   const acImg = findOne(tree, (n) => n.tagName === "ac:image");
-  assertEquals(acImg, undefined);
-
-  const txts = findAll(tree, (n) => n.type === "text");
-  const joined = txts.map((t: any) => t.value).join("");
-  assertStringIncludes(joined, "@@ATTACH|file=a.png|width=100@@");
+  assertExists(acImg);
+  assertEquals(acImg?.properties?.["ac:width"], "100");
 });

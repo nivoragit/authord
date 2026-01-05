@@ -1,28 +1,20 @@
 import {
   PNG_MAGIC,
-  IMAGE_DIR,
   hashString,
   isPngFileOK,
   makeAttachmentStub,
 } from "../lib/utils/images.ts";
 import { setCommandRunner, renderMermaidDefinitionToFile } from "../lib/utils/mermaid.ts";
+import { getRenderRuntime, setRenderRuntime, type RenderRuntime } from "../lib/core/shared/runtime.ts";
 import * as path from "node:path";
 
-async function withDenoOverrides<T>(
-  overrides: Record<string, unknown>,
-  fn: () => Promise<T> | T,
-): Promise<T> {
-  const original: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(overrides)) {
-    original[key] = (Deno as any)[key];
-    (Deno as any)[key] = value;
-  }
+async function withRuntime<T>(rt: RenderRuntime, fn: () => Promise<T> | T): Promise<T> {
+  const prev = getRenderRuntime();
+  setRenderRuntime(rt);
   try {
     return await fn();
   } finally {
-    for (const [key, value] of Object.entries(original)) {
-      (Deno as any)[key] = value;
-    }
+    setRenderRuntime(prev ?? null);
   }
 }
 
@@ -36,15 +28,15 @@ Deno.test("images: hashString is deterministic and hex length 8", () => {
 });
 
 Deno.test("images: isPngFileOK detects PNG by magic", async () => {
-  await withDenoOverrides(
+  await withRuntime(
     {
-      open: async () => ({
-        read: async (buf: Uint8Array) => {
-          buf.set(PNG_MAGIC);
-          return PNG_MAGIC.length;
-        },
-        close: () => {},
-      }),
+      fs: {
+        readFile: async () => PNG_MAGIC,
+        writeFile: async () => {},
+        stat: async () => null,
+        mkdir: async () => {},
+        remove: async () => {},
+      },
     },
     async () => {
       const ok = await isPngFileOK("/virtual/x.png");
@@ -59,7 +51,8 @@ Deno.test("images: makeAttachmentStub builds Confluence storage XHTML", () => {
   if (!s.includes('ri:filename="logo.png"')) throw new Error("Missing ri:attachment filename");
   if (!s.includes('ac:width="100"')) throw new Error("Width not normalized");
   if (!s.includes('ac:height="200"')) throw new Error("Height not normalized");
-  if (!s.includes('alt="Logo"')) throw new Error("Alt not included");
+  if (!s.includes('ac:alt="Logo"')) throw new Error("Alt not included");
+  if (!s.includes('ac:title="Logo"')) throw new Error("Title not included");
 });
 
 // Deno.test("images: setImageDir overrides default", () => {
@@ -80,16 +73,21 @@ Deno.test("mermaid: prefers local node_modules/.bin/mmdc", async () => {
     return { code: 0 };
   });
 
-  await withDenoOverrides(
+  await withRuntime(
     {
-      makeTempFile: async () => "/virtual/tmp.mmd",
-      writeTextFile: async () => {},
-      mkdir: async () => {},
-      remove: async () => {},
-      stat: async (p: string) => {
-        if (p === mmdcPath || p === outFile) return { isFile: true };
-        throw new Error("ENOENT");
+      fs: {
+        readFile: async () => new Uint8Array(),
+        writeFile: async () => {},
+        mkdir: async () => {},
+        remove: async () => {},
+        makeTempFile: async () => "/virtual/tmp.mmd",
+        stat: async (p: string) => {
+          if (p === mmdcPath || p === outFile) return { isFile: true, isDirectory: false };
+          return null;
+        },
       },
+      env: { get: () => undefined },
+      cwd: () => cwd,
     },
     async () => {
       await renderMermaidDefinitionToFile("graph TD; A-->B;", outFile, { cwd });
@@ -116,16 +114,21 @@ Deno.test("mermaid: falls back to `npx -y mmdc` and applies options", async () =
     return { code: 0 };
   });
 
-  await withDenoOverrides(
+  await withRuntime(
     {
-      makeTempFile: async () => "/virtual/tmp.mmd",
-      writeTextFile: async () => {},
-      mkdir: async () => {},
-      remove: async () => {},
-      stat: async (p: string) => {
-        if (p === outFile) return { isFile: true };
-        throw new Error("ENOENT");
+      fs: {
+        readFile: async () => new Uint8Array(),
+        writeFile: async () => {},
+        mkdir: async () => {},
+        remove: async () => {},
+        makeTempFile: async () => "/virtual/tmp.mmd",
+        stat: async (p: string) => {
+          if (p === outFile) return { isFile: true, isDirectory: false };
+          return null;
+        },
       },
+      env: { get: () => undefined },
+      cwd: () => cwd,
     },
     async () => {
       await renderMermaidDefinitionToFile("flowchart LR; X-->Y;", outFile, {
