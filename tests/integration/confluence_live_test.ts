@@ -1,9 +1,9 @@
 import { assert, assertEquals } from "std/assert";
-import { asPageId, asStorageXhtml, asUrl, type ConfluenceCfg } from "../../lib/core/shared/types.ts";
+import { asPageId, asStorageXhtml, asUrl, type ConfluenceCfg } from "@authord/render-core/core/shared/types.ts";
 import { ConfluencePageRepository, ConfluenceAttachmentRepository, ConfluencePropertyStore } from "../../lib/confluence_api/confluence_repos.ts";
-import { ConfluenceSync } from "../../lib/core/application/confluence_sync.ts";
+import { ConfluenceSync } from "@authord/render-core/core/application/confluence_sync.ts";
 import { getPageWithVersion } from "../../lib/confluence_api/confluence_rest.ts";
-import { PNG_MAGIC } from "../../lib/utils/images.ts";
+import { PNG_MAGIC } from "@authord/render-core/utils/images.ts";
 import * as path from "node:path";
 
 function safeEnvGet(name: string): string | undefined {

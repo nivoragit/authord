@@ -3,9 +3,9 @@ import {
   hashString,
   isPngFileOK,
   makeAttachmentStub,
-} from "../lib/utils/images.ts";
-import { setCommandRunner, renderMermaidDefinitionToFile } from "../lib/utils/mermaid.ts";
-import { getRenderRuntime, setRenderRuntime, type RenderRuntime } from "../lib/core/shared/runtime.ts";
+} from "@authord/render-core/utils/images.ts";
+import { setCommandRunner, renderMermaidDefinitionToFile } from "@authord/render-core/utils/mermaid.ts";
+import { getRenderRuntime, setRenderRuntime, type RenderRuntime } from "@authord/render-core/core/shared/runtime.ts";
 import * as path from "node:path";
 
 async function withRuntime<T>(rt: RenderRuntime, fn: () => Promise<T> | T): Promise<T> {

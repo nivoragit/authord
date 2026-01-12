@@ -5,8 +5,8 @@ import {
   assertExists,
   assertMatch,
 } from "std/assert";
-import { AuthordAstAssembler } from "../../lib/core/application/authord_ast_assembler.ts";
-import { makeLocalFirstCachingFetcher } from "../../lib/utils/schema_fetcher.ts";
+import { AuthordAstAssembler } from "@authord/render-core/core/application/authord_ast_assembler.ts";
+import { makeLocalFirstCachingFetcher } from "@authord/render-core/utils/schema_fetcher.ts";
 
 
 /* ───────────────────────── helpers: tiny xast builders ─────────────────── */

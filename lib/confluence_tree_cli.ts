@@ -4,7 +4,7 @@
 
 import * as path from "node:path";
 import { Command } from "npm:commander@^12";
-import { ConfluenceCfg, asUrl, asPageId } from "./core/shared/types.ts";
+import { ConfluenceCfg, asUrl, asPageId } from "@authord/render-core/core/shared/types.ts";
 import { ConfluenceTreePublisher } from "./confluence_tree_publisher.ts";
 
 /* ---------------------------------- Helpers --------------------------------- */

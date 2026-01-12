@@ -4,20 +4,20 @@ import {
   assert,
 } from "std/assert";
 
-import { ConfluenceSync, type ConfluencePage, type ConfluenceFolder } from "../../lib/core/application/confluence_sync.ts";
+import { ConfluenceSync, type ConfluencePage, type ConfluenceFolder } from "@authord/render-core/core/application/confluence_sync.ts";
 import {
   asPageId,
   asStorageXhtml,
   type PageId,
   type Path,
   type StorageXhtml,
-} from "../../lib/core/shared/types.ts";
+} from "@authord/render-core/core/shared/types.ts";
 import type {
   IPageRepository,
   IAttachmentRepository,
   IPropertyStore,
   AttachmentInfo,
-} from "../../lib/core/ports/ports.ts";
+} from "@authord/render-core/core/ports/ports.ts";
 
 // ---- Test fixtures -----------------------------------------------------------
 

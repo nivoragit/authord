@@ -6,7 +6,7 @@ import remarkDirective from "remark-directive";
 import remarkRehype from "remark-rehype";
 import rehypeRaw from "rehype-raw";
 
-import remarkWritersideCustomElements from "../../lib/plugins/remark_writerside_custom_elements.ts";
+import remarkWritersideCustomElements from "@authord/render-core/plugins/remark_writerside_custom_elements.ts";
 
 type HNode = {
   type: string;

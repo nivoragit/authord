@@ -6,7 +6,7 @@ import {
   INSTANCE_DTD,
   INSTANCE_XML,
 } from "../test_utils.ts";
-import { InstanceProfileParser } from "../../lib/core/domain/parse/instance_profile_parser.ts";
+import { InstanceProfileParser } from "@authord/render-core/core/domain/parse/instance_profile_parser.ts";
 
 Deno.test("instance-profile parser accepts valid instance-profile", async () => {
   await withSchemaFetch({ [INSTANCE_DTD_URL]: INSTANCE_DTD }, async () => {

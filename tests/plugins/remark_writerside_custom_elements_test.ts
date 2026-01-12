@@ -2,7 +2,7 @@ import { assertStringIncludes } from "std/assert";
 import { unified } from "unified";
 import remarkParse from "remark-parse";
 
-import remarkWritersideCustomElements from "../../lib/plugins/remark_writerside_custom_elements.ts";
+import remarkWritersideCustomElements from "@authord/render-core/plugins/remark_writerside_custom_elements.ts";
 
 Deno.test("remark_writerside_custom_elements expands self-closing tags", () => {
   const md = [

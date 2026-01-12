@@ -1,5 +1,5 @@
 import { assertEquals } from "std/assert";
-import rehypeConfluenceMedia from "../../lib/plugins/rehype-confluence-media.ts";
+import rehypeConfluenceMedia from "@authord/render-core/plugins/rehype-confluence-media.ts";
 
 type HNode = {
   type: string;

@@ -1,4 +1,4 @@
-import { ConfluenceCfg, PageId } from "../core/shared/types.ts";
+import { ConfluenceCfg, PageId } from "@authord/render-core/core/shared/types.ts";
 
 
 function authHeader(cfg: ConfluenceCfg) {

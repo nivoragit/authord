@@ -1,5 +1,5 @@
 import { assertStringIncludes } from "std/assert";
-import { renderMixedMarkdownToHtml } from "../../lib/utils/mixed_markdown_renderer.ts";
+import { renderMixedMarkdownToHtml } from "@authord/render-core/utils/mixed_markdown_renderer.ts";
 
 Deno.test("mixed markdown: markdown + chapter + list", async () => {
   const src = `# Configuration Reference

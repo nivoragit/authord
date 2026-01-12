@@ -1,7 +1,7 @@
 // topic_parser_test.ts
 import { assertRejects } from "jsr:@std/assert@^1.0.0";
 import { withSchemaFetch, TOPIC_XSD_URL, TOPIC_XSD, TOPIC_XML } from "../test_utils.ts";
-import { TopicParser } from "../../lib/core/domain/parse/topic_parser.ts";
+import { TopicParser } from "@authord/render-core/core/domain/parse/topic_parser.ts";
 
 Deno.test("topic parser accepts valid topic", async () => {
   await withSchemaFetch({ [TOPIC_XSD_URL]: TOPIC_XSD }, async () => {

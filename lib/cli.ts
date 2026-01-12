@@ -4,8 +4,8 @@
 import { Command } from "npm:commander@^12";
 import { createConfluencePublishSinglePageCommand } from "./confluence_single_page_cli.ts";
 import { createConfluencePublishTreeCommand } from "./confluence_tree_cli.ts";
-import { setRenderRuntime } from "./core/shared/runtime.ts";
-import { createDenoRuntime } from "../packages/runtime-deno/mod.ts";
+import { setRenderRuntime } from "@authord/render-core";
+import { createDenoRuntime } from "@authord/render-core/runtime-deno";
 
 export async function main(argv: string[] = Deno.args) {
   console.debug(`[authord:debug] cli.ts argv=${JSON.stringify(argv)}`);

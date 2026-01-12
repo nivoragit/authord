@@ -2,8 +2,10 @@
   "imports": {
     "commander": "npm:commander@latest",
     "axios": "npm:axios@latest",
-    "@authord/render-core": "https://raw.githubusercontent.com/nivoragit/authord-render-core/main/src/mod.ts",
-    "@authord/runtime-node": "https://raw.githubusercontent.com/nivoragit/authord-runtime-node/main/src/mod.ts",
+    "@authord/render-core": "https://raw.githubusercontent.com/nivoragit/authord-render-core/main/mod.ts",
+    "@authord/render-core/": "https://raw.githubusercontent.com/nivoragit/authord-render-core/main/src/",
+    "@authord/render-core/runtime-node": "https://raw.githubusercontent.com/nivoragit/authord-render-core/main/runtime-node.ts",
+    "@authord/render-core/runtime-deno": "https://raw.githubusercontent.com/nivoragit/authord-render-core/main/runtime-deno.ts",
     "fast-xml-parser": "npm:fast-xml-parser@latest",
     "unified": "npm:unified@latest",
     "remark-parse": "npm:remark-parse@latest",

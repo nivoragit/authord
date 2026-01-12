@@ -1,4 +1,4 @@
-import { WritersideMarkdownTransformer } from "../lib/writerside_markdown_transformer.ts";
+import { WritersideMarkdownTransformer } from "@authord/render-core/writerside_markdown_transformer.ts";
 
 const SYNTAX_REFERENCE_MD = String.raw`# Syntax Reference
 

@@ -8,7 +8,7 @@ import {
   assertStringIncludes,
   assertMatch,
 } from "std/assert";
-import rehypeConfluenceStorage from "../../lib/plugins/rehype_confluence_storage.ts";
+import rehypeConfluenceStorage from "@authord/render-core/plugins/rehype_confluence_storage.ts";
 
 
 

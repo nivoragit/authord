@@ -56,3 +56,6 @@ bin/
 
 # Ignore Deno lock file
 deno.lock
+# Ignore IDE specific files
+.idea/
+.idea/*

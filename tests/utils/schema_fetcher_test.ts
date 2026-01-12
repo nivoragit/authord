@@ -1,5 +1,5 @@
 import { assertEquals, assertRejects } from "std/assert";
-import { makeLocalFirstCachingFetcher } from "../../lib/utils/schema_fetcher.ts";
+import { makeLocalFirstCachingFetcher } from "@authord/render-core/utils/schema_fetcher.ts";
 
 async function withDenoOverrides<T>(
   overrides: Record<string, unknown>,

@@ -2,7 +2,7 @@
 import { assertEquals, assertRejects } from "jsr:@std/assert@^1.0.0";
 
 import { withSchemaFetch, CFG_XSD_URL, CFG_XSD, CFG_XML } from "../test_utils.ts";
-import { WritersideCfgParser } from "../../lib/core/domain/parse/cfg_parser.ts";
+import { WritersideCfgParser } from "@authord/render-core/core/domain/parse/cfg_parser.ts";
 
 Deno.test("cfg parser accepts valid cfg and projects IR", async () => {
   await withSchemaFetch({ [CFG_XSD_URL]: CFG_XSD }, async () => {

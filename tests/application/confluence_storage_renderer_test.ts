@@ -1,10 +1,10 @@
 // deno-lint-ignore-file no-explicit-any
 import { assertStringIncludes } from "std/assert";
 import type { Element as XEl } from "xast";
-import type { IMarkdownTransformer } from "../../lib/core/ports/ports.ts";
+import type { IMarkdownTransformer } from "@authord/render-core/core/ports/ports.ts";
 import { unified } from "unified";
 import rehypeStringify from "rehype-stringify";
-import { ConfluenceStorageRenderer } from "../../lib/core/application/confluence_storage_renderer.ts";
+import { ConfluenceStorageRenderer } from "@authord/render-core/core/application/confluence_storage_renderer.ts";
 
 function xel(name: string, attrs: Record<string, unknown> = {}, children: any[] = []): XEl {
   return { type: "element", name, attributes: attrs, children } as unknown as XEl;

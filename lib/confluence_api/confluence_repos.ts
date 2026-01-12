@@ -5,13 +5,13 @@ import type {
   IAttachmentRepository,
   IPropertyStore,
   AttachmentInfo,
-} from "../core/ports/ports.ts";
+} from "@authord/render-core/core/ports/ports.ts";
 import type {
   ConfluenceCfg,
   PageId,
   Path,
   StorageXhtml,
-} from "../core/shared/types.ts";
+} from "@authord/render-core/core/shared/types.ts";
 import axios, { type AxiosInstance } from "axios";
 import {
   authHeaders,
@@ -28,7 +28,7 @@ import * as p from "node:path";
 import {
   type ExportHash,
   isExportHash,
-} from "../core/domain/entities.ts";
+} from "@authord/render-core/core/domain/entities.ts";
 
 export class ConfluencePageRepository implements IPageRepository {
   private readonly cfg: ConfluenceCfg;

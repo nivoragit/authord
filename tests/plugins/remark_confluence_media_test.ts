@@ -1,5 +1,5 @@
 import { assertEquals, assertStringIncludes } from "std/assert";
-import remarkConfluenceMedia from "../../lib/plugins/remark_confluence_media.ts";
+import remarkConfluenceMedia from "@authord/render-core/plugins/remark_confluence_media.ts";
 
 Deno.test("remark_confluence_media: image attr block -> confluence-image with dims", async () => {
   const tree: any = {

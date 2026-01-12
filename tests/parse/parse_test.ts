@@ -1,8 +1,8 @@
 // parsers_test.ts
 import { assertEquals, assertRejects } from "std/assert";
-import { WritersideCfgParser } from "../../lib/core/domain/parse/cfg_parser.ts";
-import { InstanceProfileParser } from "../../lib/core/domain/parse/instance_profile_parser.ts";
-import { TopicParser } from "../../lib/core/domain/parse/topic_parser.ts";
+import { WritersideCfgParser } from "@authord/render-core/core/domain/parse/cfg_parser.ts";
+import { InstanceProfileParser } from "@authord/render-core/core/domain/parse/instance_profile_parser.ts";
+import { TopicParser } from "@authord/render-core/core/domain/parse/topic_parser.ts";
 
 
 // ---- sample CFG XML ----
